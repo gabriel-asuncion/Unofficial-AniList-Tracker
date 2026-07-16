@@ -7,14 +7,18 @@ let cachedAllScheduleList = [];
 let currentDayTabIndex = new Date().getDay(); 
 let currentFilter = 'SCHEDULE'; 
 const debounceTimers = {}; 
-let progressInterval = null; // Add this near the top of popup.js
+let progressInterval = null; 
+let currentThreshold = 80;
 
 // Auto-detect variables
 let detectedMedia = null;
 let detectedEpisode = null;
 
 document.addEventListener('DOMContentLoaded', () => {
-  chrome.storage.local.get(['anilistToken'], (result) => {
+  // 1. INITIAL BOOT: Load token and threshold
+  chrome.storage.local.get(['anilistToken', 'trackingThreshold'], (result) => {
+    if (result.trackingThreshold) currentThreshold = result.trackingThreshold;
+    
     if (result.anilistToken) {
       accessToken = result.anilistToken;
       updateAuthUI(true);
@@ -24,8 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  
-
+  // --- CORE LISTENERS ---
   document.getElementById('login-btn').addEventListener('click', handleLoginClick);
   document.getElementById('logout-btn').addEventListener('click', handleLogoutClick);
   
@@ -59,17 +62,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#user-profile') && !e.target.closest('#filter-dropdown')) {
-      document.getElementById('filter-dropdown').classList.add('hidden');
+      const dropdown = document.getElementById('filter-dropdown');
+      if (dropdown) dropdown.classList.add('hidden');
     }
   });
 
-  document.getElementById('status-select').addEventListener('change', (e) => {
-    if (e.target.value === 'COMPLETED' && currentSelectedAnime?.media?.episodes) {
-      document.getElementById('episode-input').value = currentSelectedAnime.media.episodes;
-    }
-  });
+  const statusSelect = document.getElementById('status-select');
+  if (statusSelect) {
+    statusSelect.addEventListener('change', (e) => {
+      if (e.target.value === 'COMPLETED' && currentSelectedAnime?.media?.episodes) {
+        document.getElementById('episode-input').value = currentSelectedAnime.media.episodes;
+      }
+    });
+  }
 
-  // --- NEW: Skip Intro Button ---
+  // --- SKIP INTRO BUTTON ---
   const skipBtn = document.getElementById('skip-intro-btn');
   if (skipBtn) {
     skipBtn.addEventListener('click', () => {
@@ -81,58 +88,75 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- NEW: Settings Navigation ---
-  document.getElementById('settings-btn').addEventListener('click', () => {
-    document.getElementById('main-view').classList.add('hidden');
-    document.getElementById('search-input').classList.add('hidden');
-    document.getElementById('autodetect-view').classList.add('hidden');
-    document.getElementById('settings-view').classList.remove('hidden');
-    
-    // Load current settings
-    chrome.storage.local.get(['trackingThreshold', 'whitelistedDomains'], (res) => {
-      const threshold = res.trackingThreshold || 80;
-      document.getElementById('threshold-slider').value = threshold;
-      document.getElementById('threshold-display').textContent = `${threshold}%`;
-      renderWhitelistManager(res.whitelistedDomains || []);
+  // --- SETTINGS NAVIGATION (Fixed Copy-Paste Bug) ---
+  const settingsBtn = document.getElementById('settings-btn');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      document.getElementById('main-view').classList.add('hidden');
+      document.getElementById('search-input').classList.add('hidden');
+      document.getElementById('autodetect-view').classList.add('hidden');
+      document.getElementById('settings-view').classList.remove('hidden');
+      
+      // Load current settings correctly!
+      chrome.storage.local.get(['trackingThreshold', 'whitelistedDomains'], (res) => {
+        const threshold = res.trackingThreshold || 80;
+        const slider = document.getElementById('threshold-slider');
+        const display = document.getElementById('threshold-display');
+        
+        if (slider && display) {
+          slider.value = threshold;
+          display.textContent = `${threshold}%`;
+        }
+        renderWhitelistManager(res.whitelistedDomains || []);
+      });
     });
-  });
+  }
 
-  document.getElementById('settings-back-btn').addEventListener('click', () => {
-    document.getElementById('settings-view').classList.add('hidden');
-    loadAnimeList(); // Go back to main list
-  });
+  const settingsBackBtn = document.getElementById('settings-back-btn');
+  if (settingsBackBtn) {
+    settingsBackBtn.addEventListener('click', () => {
+      document.getElementById('settings-view').classList.add('hidden');
+      loadAnimeList(); 
+    });
+  }
 
-  // --- NEW: Threshold Slider Logic ---
+  // --- THRESHOLD SLIDER LOGIC ---
   const thresholdSlider = document.getElementById('threshold-slider');
-  thresholdSlider.addEventListener('input', (e) => {
-    document.getElementById('threshold-display').textContent = `${e.target.value}%`;
-  });
-  thresholdSlider.addEventListener('change', (e) => {
-    chrome.storage.local.set({ trackingThreshold: parseInt(e.target.value, 10) });
-  });
+  if (thresholdSlider) {
+    thresholdSlider.addEventListener('input', (e) => {
+      const display = document.getElementById('threshold-display');
+      if (display) display.textContent = `${e.target.value}%`;
+    });
+    thresholdSlider.addEventListener('change', (e) => {
+      currentThreshold = parseInt(e.target.value, 10); 
+      chrome.storage.local.set({ trackingThreshold: currentThreshold });
+    });
+  }
 
-  document.getElementById('autodetect-cancel-btn').addEventListener('click', () => {
-    // if (progressInterval) clearInterval(progressInterval); // Clean up the interval
-    document.getElementById('autodetect-view').classList.add('hidden');
-    loadAnimeList(); 
-  });
+  const autodetectCancelBtn = document.getElementById('autodetect-cancel-btn');
+  if (autodetectCancelBtn) {
+    autodetectCancelBtn.addEventListener('click', () => {
+      document.getElementById('autodetect-view').classList.add('hidden');
+      loadAnimeList(); 
+    });
+  }
 
-  // --- CRASH-PROOF WHITELIST LISTENERS ---
+  // --- WHITELIST LISTENERS ---
   const whitelistCancelBtn = document.getElementById('whitelist-cancel-btn');
   if (whitelistCancelBtn) {
     whitelistCancelBtn.addEventListener('click', () => {
       document.getElementById('whitelist-view').classList.add('hidden');
-      loadAnimeList(); // Skip tracking and just load normal schedule
+      loadAnimeList(); 
     });
-  } else {
-    console.warn("Whitelist Cancel button not found in HTML!");
   }
 
   const whitelistConfirmBtn = document.getElementById('whitelist-confirm-btn');
   if (whitelistConfirmBtn) {
     whitelistConfirmBtn.addEventListener('click', () => {
-      const hostname = document.getElementById('whitelist-hostname').textContent;
+      const hostnameEl = document.getElementById('whitelist-hostname');
+      if (!hostnameEl) return;
       
+      const hostname = hostnameEl.textContent;
       chrome.storage.local.get(['whitelistedDomains'], (result) => {
         const domains = result.whitelistedDomains || [];
         if (!domains.includes(hostname)) {
@@ -146,39 +170,69 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     });
-  } else {
-    console.warn("Whitelist Confirm button not found in HTML!");
   }
 
-  document.getElementById('episode-input').addEventListener('input', handleEpisodeInput);
-  document.getElementById('save-btn').addEventListener('click', saveAnimeUpdate);
+  const epInput = document.getElementById('episode-input');
+  if (epInput) epInput.addEventListener('input', handleEpisodeInput);
+  
+  const saveBtn = document.getElementById('save-btn');
+  if (saveBtn) saveBtn.addEventListener('click', saveAnimeUpdate);
 
-  document.getElementById('detail-image').addEventListener('click', () => {
-    if (currentSelectedAnime) {
-      document.getElementById('modal-img').src = currentSelectedAnime.media.coverImage.large;
-      document.getElementById('fullscreen-modal').classList.remove('hidden');
-    }
-  });
+  const detailImg = document.getElementById('detail-image');
+  if (detailImg) {
+    detailImg.addEventListener('click', () => {
+      if (currentSelectedAnime) {
+        document.getElementById('modal-img').src = currentSelectedAnime.media.coverImage.large;
+        document.getElementById('fullscreen-modal').classList.remove('hidden');
+      }
+    });
+  }
 
-  document.getElementById('fullscreen-modal').addEventListener('click', () => {
-    document.getElementById('fullscreen-modal').classList.add('hidden');
-  });
+  const fullModal = document.getElementById('fullscreen-modal');
+  if (fullModal) {
+    fullModal.addEventListener('click', () => {
+      fullModal.classList.add('hidden');
+    });
+  }
 
-  document.getElementById('autodetect-confirm-btn').addEventListener('click', handleAutoDetectConfirm);
+  const autoConfirmBtn = document.getElementById('autodetect-confirm-btn');
+  if (autoConfirmBtn) autoConfirmBtn.addEventListener('click', handleAutoDetectConfirm);
 });
 
+// --- UPDATED: Transparent Error Handling for Login ---
 function handleLoginClick() {
+  const btn = document.getElementById('login-btn');
+  const originalText = btn.textContent;
+  btn.textContent = "Connecting...";
+
   const authUrl = `https://anilist.co/api/v2/oauth/authorize?client_id=${CLIENT_ID}&response_type=token`;
+  
   chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (redirectUrlResult) => {
-    if (chrome.runtime.lastError || !redirectUrlResult) return;
+    if (chrome.runtime.lastError) {
+      console.error("Auth Error:", chrome.runtime.lastError.message);
+      btn.textContent = "Error - Check Console";
+      setTimeout(() => { btn.textContent = originalText; }, 3000);
+      return;
+    }
+    
+    if (!redirectUrlResult) {
+      btn.textContent = originalText;
+      return;
+    }
+    
     const hash = new URL(redirectUrlResult).hash;
     const token = new URLSearchParams(hash.substring(1)).get('access_token');
+    
     if (token) {
       accessToken = token;
       chrome.storage.local.set({ anilistToken: accessToken }, () => {
         updateAuthUI(true);
         initializeApp();
+        btn.textContent = originalText; // reset for next time
       });
+    } else {
+      btn.textContent = "Failed to get token";
+      setTimeout(() => { btn.textContent = originalText; }, 3000);
     }
   });
 }
@@ -213,15 +267,17 @@ function updateAuthUI(isLoggedIn) {
   const appView = document.getElementById('app-view');
   const detailView = document.getElementById('detail-view');
   const autodetectView = document.getElementById('autodetect-view');
+  const settingsView = document.getElementById('settings-view');
 
   if (isLoggedIn) {
-    loginView.classList.add('hidden');
-    appView.classList.remove('hidden');
-    autodetectView.classList.add('hidden'); // Reset
+    if (loginView) loginView.classList.add('hidden');
+    if (appView) appView.classList.remove('hidden');
+    if (autodetectView) autodetectView.classList.add('hidden'); 
+    if (settingsView) settingsView.classList.add('hidden');
   } else {
-    loginView.classList.remove('hidden');
-    appView.classList.add('hidden');
-    detailView.classList.add('hidden');
+    if (loginView) loginView.classList.remove('hidden');
+    if (appView) appView.classList.add('hidden');
+    if (detailView) detailView.classList.add('hidden');
   }
 }
 
@@ -238,8 +294,6 @@ async function apiRequest(query, variables = {}) {
   return response.json();
 }
 
-// --- NEW AUTO-DETECT LOGIC ---
-
 async function initializeApp() {
   document.getElementById('anime-list').innerHTML = '';
   const viewerQuery = `query { Viewer { id name avatar { medium } } }`;
@@ -251,7 +305,6 @@ async function initializeApp() {
     document.getElementById('user-avatar').src = viewer.avatar.medium;
     document.getElementById('user-name').textContent = viewer.name;
 
-    // Before loading the normal list, check the active tab!
     const foundAnimeOnTab = await checkCurrentTabForAnime();
     if (!foundAnimeOnTab) {
       loadAnimeList(); 
@@ -261,9 +314,10 @@ async function initializeApp() {
   }
 }
 
-// --- NEW: Whitelist Manager Renderer ---
 function renderWhitelistManager(domains) {
   const container = document.getElementById('whitelist-manager-list');
+  if (!container) return;
+  
   container.innerHTML = '';
 
   if (domains.length === 0) {
@@ -287,19 +341,17 @@ function renderWhitelistManager(domains) {
     container.appendChild(item);
   });
 
-  // Add delete listeners
   document.querySelectorAll('.remove-domain-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const idx = e.target.getAttribute('data-index');
       domains.splice(idx, 1);
       chrome.storage.local.set({ whitelistedDomains: domains }, () => {
-        renderWhitelistManager(domains); // Re-render instantly
+        renderWhitelistManager(domains);
       });
     });
   });
 }
 
-// --- SMART SEARCH HELPER ---
 async function searchAnimeWithFallbacks(rawTitle) {
   const query = `
     query ($search: String) {
@@ -311,37 +363,32 @@ async function searchAnimeWithFallbacks(rawTitle) {
   `;
 
   async function doSearch(term) {
-    console.log(`AniList Search Attempt: "${term}"`);
     const res = await apiRequest(query, { search: term });
     return res.data?.Media || null;
   }
 
-  // Attempt 1: The raw cleaned title
   let media = await doSearch(rawTitle);
   if (media) return media;
 
-  // Attempt 2: Strip parentheses and anything inside them (e.g., "(And Proud of it)!")
   let noBrackets = rawTitle.replace(/\[.*?\]|\(.*?\)[^\w\s]*/g, '').trim();
   if (noBrackets && noBrackets !== rawTitle) {
     media = await doSearch(noBrackets);
     if (media) return media;
   }
 
-  // Attempt 3: Strip aggressive punctuation (?, !, commas)
   let noPunctuation = noBrackets.replace(/[?!,]/g, '').replace(/\s+/g, ' ').trim();
   if (noPunctuation && noPunctuation !== noBrackets) {
     media = await doSearch(noPunctuation);
     if (media) return media;
   }
 
-  // Attempt 4: Split at the first colon or dash (grabs just the main franchise name)
   let splitTitle = rawTitle.split(/[:\-]/)[0].trim();
   if (splitTitle && splitTitle !== rawTitle && splitTitle.length > 3) {
     media = await doSearch(splitTitle);
     if (media) return media;
   }
 
-  return null; // Total failure
+  return null; 
 }
 
 async function checkCurrentTabForAnime() {
@@ -352,70 +399,47 @@ async function checkCurrentTabForAnime() {
       const title = tabs[0].title || "";
       let hostname = "unknown";
 
-      // CRITICAL FIX: Safely parse the URL. Chrome blocks URLs on New Tab or Extension pages!
       try {
         if (tabs[0].url) {
           hostname = new URL(tabs[0].url).hostname;
         }
-      } catch (e) {
-        console.log("Could not parse tab URL (likely a restricted browser page).");
-      }
+      } catch (e) {}
 
       const regex = /(?:Watch\s+)?(.*?)\s*(?:[-|—–:~]+\s*)?(?:Season\s*\d+\s*)?(?:Episode|Ep|EP|E)\.?\s*0*(\d+)/i;
       const match = title.match(regex);
 
       if (match && match[1] && match[2]) {
-        // --- WHITELIST INTERCEPTOR ---
         chrome.storage.local.get(['whitelistedDomains'], async (result) => {
           const domains = result.whitelistedDomains || [];
           const isWhitelisted = domains.some(d => hostname.includes(d));
 
           if (!isWhitelisted) {
-            // It looks like an anime, but isn't whitelisted. Ask the user!
             showWhitelistView(hostname);
-            return resolve(true); // Stop the normal list from loading
+            return resolve(true); 
           }
 
-          // If it IS whitelisted, proceed with the normal smart search logic
           let parsedTitle = match[1].replace(/[-|—–:~]+$/g, '').trim(); 
           parsedTitle = parsedTitle.replace(/\s+\(?(?:Sub|Dub)\)?$/i, '').trim();
           const parsedEp = parseInt(match[2], 10);
           
           try {
             const media = await searchAnimeWithFallbacks(parsedTitle);
-            
             if (media) {
-              console.log(`Auto-Detect Check: Found AniList Match ->`, media.title.romaji);
               detectedMedia = media;
               detectedEpisode = parsedEp;
               showAutoDetectView(media, parsedEp);
               return resolve(true);
             }
           } catch (e) {
-            console.error("Auto-detect AniList search failed", e);
+            console.error("Search failed", e);
           }
           resolve(false);
         });
       } else {
-        resolve(false); // No anime title detected, load normal list
+        resolve(false); 
       }
     });
   });
-}
-
-// --- NEW PROGRESS BAR HELPER ---
-function updateProgressBar(progressValue) {
-  const pct = progressValue.toFixed(1);
-  const progressBar = document.getElementById('video-progress-bar');
-  const progressText = document.getElementById('video-progress-text');
-  
-  // Cap the visual bar at 100% so it doesn't overflow
-  const visualPct = Math.min(progressValue, 100).toFixed(1);
-
-  if (progressBar && progressText) {
-    progressBar.style.width = visualPct + '%';
-    progressText.textContent = `Video Progress: ${pct}%`;
-  }
 }
 
 function showWhitelistView(hostname) {
@@ -424,7 +448,8 @@ function showWhitelistView(hostname) {
   document.getElementById('autodetect-view').classList.add('hidden');
   document.getElementById('whitelist-view').classList.remove('hidden');
   
-  document.getElementById('whitelist-hostname').textContent = hostname;
+  const hostEl = document.getElementById('whitelist-hostname');
+  if (hostEl) hostEl.textContent = hostname;
 }
 
 function showAutoDetectView(media, ep) {
@@ -442,45 +467,37 @@ function showAutoDetectView(media, ep) {
   const cancelBtn = document.getElementById('autodetect-cancel-btn');
   const actionsEl = document.querySelector('.autodetect-actions');
   
-  // Ensure the action container is visible
   epTextEl.classList.remove('hidden');
   actionsEl.classList.remove('hidden');
-  
-  // UI UPGRADE: Hide the manual update button completely to enforce the 80% rule!
-  confirmBtn.classList.add('hidden');
-  cancelBtn.textContent = 'View My Anime List'; // Repurpose the cancel button
+  if (confirmBtn) confirmBtn.classList.add('hidden');
+  if (cancelBtn) cancelBtn.textContent = 'View My Anime List'; 
   
   if (currentProg >= ep) {
     epTextEl.textContent = `✅ You are already at Ep ${currentProg}`;
     epTextEl.style.color = "#98C379"; 
   } else {
-    epTextEl.textContent = `Tracking Ep ${ep}... (Auto-updates at 80%)`;
-    epTextEl.style.color = "#E5C07B"; // Gold color to indicate it is actively tracking
+    epTextEl.textContent = `Tracking Ep ${ep}... (Auto-updates at ${currentThreshold}%)`;
+    epTextEl.style.color = "#E5C07B"; 
   }
 }
 
-// --- Listen for the LIVE_VIDEO_PROGRESS pushed from content.js ---
 chrome.runtime.onMessage.addListener((message) => {
   if (message.action === "LIVE_VIDEO_PROGRESS") {
     const pct = message.progress.toFixed(1);
-    
     const progressBar = document.getElementById('video-progress-bar');
     const progressText = document.getElementById('video-progress-text');
-    const visualPct = Math.min(message.progress, 100).toFixed(1); // Cap visual bar at 100%
+    const visualPct = Math.min(message.progress, 100).toFixed(1); 
     
     if (progressBar && progressText) {
       progressBar.style.width = visualPct + '%';
       progressText.textContent = `Video Progress: ${pct}%`;
     }
 
-    // NEW UPGRADE: If the popup is open when we hit 80%, dynamically update the UI!
-    if (message.progress >= 80) {
+    if (message.progress >= currentThreshold) {
       const epTextEl = document.getElementById('autodetect-ep');
-      
-      // Only change the text if it hasn't already been changed
-      if (!epTextEl.textContent.includes("✅") && !epTextEl.textContent.includes("already at")) {
-        epTextEl.textContent = "✅ 80% Reached! Auto-updated successfully.";
-        epTextEl.style.color = "#98C379"; // Turn text green
+      if (epTextEl && !epTextEl.textContent.includes("✅") && !epTextEl.textContent.includes("already at")) {
+        epTextEl.textContent = `✅ ${currentThreshold}% Reached! Auto-updated successfully.`;
+        epTextEl.style.color = "#98C379"; 
       }
     }
   }
@@ -508,14 +525,12 @@ async function handleAutoDetectConfirm() {
     await apiRequest(mutation, { mediaId: detectedMedia.id, progress: detectedEpisode, status: newStatus });
     btn.textContent = 'Done!';
     setTimeout(() => {
-      // if (progressInterval) clearInterval(progressInterval); // Clean up the interval
       document.getElementById('autodetect-view').classList.add('hidden');
       loadAnimeList(); 
       btn.disabled = false;
       btn.textContent = 'Update Progress';
     }, 1000);
   } catch (error) {
-    console.error("Auto-detect update failed", error);
     btn.textContent = 'Error';
     btn.disabled = false;
   }
@@ -660,13 +675,15 @@ async function loadAnimeList(silent = false) {
   document.getElementById('main-view').classList.remove('hidden'); 
   document.getElementById('search-input').classList.remove('hidden');
   
-  // --- NEW: Hide the tracker views when loading the list! ---
-  document.getElementById('autodetect-view').classList.add('hidden');
-  document.getElementById('whitelist-view').classList.add('hidden');
+  const adView = document.getElementById('autodetect-view');
+  const wlView = document.getElementById('whitelist-view');
+  const setView = document.getElementById('settings-view');
+  if (adView) adView.classList.add('hidden');
+  if (wlView) wlView.classList.add('hidden');
+  if (setView) setView.classList.add('hidden');
 
   const filter = currentFilter; 
   let query, variables;
-  // ... rest of the function remains exactly the same ...
 
   const dayTabs = document.getElementById('day-tabs');
   if (filter === 'SCHEDULE' || filter === 'SCHEDULE_ALL') {
@@ -903,20 +920,17 @@ function handleQuickPlusOneClick(entry, btnElement, progressTextElement) {
       }
     `;
 
-    // Safely construct variables, omitting undefined ones
     const variables = { mediaId: media.id, progress: entry.progress, status: newStatus };
     if (startedAt) variables.startedAt = startedAt;
     if (completedAt) variables.completedAt = completedAt;
 
     try {
       const response = await apiRequest(mutation, variables);
-      // Properly throw the error so the catch block can read it
       if (response.errors) throw new Error(JSON.stringify(response.errors));
       
       btnElement.disabled = false;
       loadAnimeList(true); 
     } catch (error) {
-      console.error("Quick +1 Failed:", error.message);
       btnElement.textContent = 'Error';
       btnElement.disabled = false;
     }
@@ -939,13 +953,10 @@ async function quickUpdateStatus(mediaId, newStatus, btnElement) {
 
     loadAnimeList(true); 
   } catch (error) {
-    console.error("Quick Add Failed:", error.message);
     btnElement.textContent = 'Add';
     btnElement.disabled = false;
   }
 }
-
-// --- DETAIL VIEW LOGIC ---
 
 function openDetailView(entry) {
   currentSelectedAnime = entry;
@@ -993,7 +1004,6 @@ async function saveAnimeUpdate() {
   if (newProgress === 1 && oldProgress === 0) startedAt = getTodayFuzzy();
   if (newStatus === 'COMPLETED' && oldStatus !== 'COMPLETED') completedAt = getTodayFuzzy();
 
-  // FIX: Changed 'scoreRaw' to 'score' in the return fields inside the curly braces below!
   const mutation = `
     mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $scoreRaw: Int, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
       SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, scoreRaw: $scoreRaw, startedAt: $startedAt, completedAt: $completedAt) {
@@ -1002,27 +1012,23 @@ async function saveAnimeUpdate() {
     }
   `;
 
-  // Safely build the variables object
   const variables = {
     mediaId,
     progress: newProgress,
     status: newStatus
   };
 
-  // Only append scoreRaw if the user typed a valid number
   const scoreVal = document.getElementById('score-input').value;
   if (scoreVal !== '') {
-    variables.scoreRaw = parseInt(scoreVal, 10); // Forces it to be an Integer
+    variables.scoreRaw = parseInt(scoreVal, 10); 
   }
 
-  // Only append dates if they were triggered
   if (startedAt) variables.startedAt = startedAt;
   if (completedAt) variables.completedAt = completedAt;
 
   try {
     const response = await apiRequest(mutation, variables);
     if (response.errors) {
-      console.error("Mutation errors:", JSON.stringify(response.errors, null, 2));
       saveBtn.textContent = 'Error! Try again';
     } else {
       saveBtn.textContent = 'Saved!';
@@ -1034,7 +1040,6 @@ async function saveAnimeUpdate() {
       }, 1000);
     }
   } catch (error) {
-    console.error("Failed to save:", error);
     saveBtn.textContent = 'Error! Try again';
     saveBtn.disabled = false;
   }
