@@ -1,5 +1,7 @@
 # Unofficial AniList Tracker
 ![App Screenshot](https://i.postimg.cc/SssjtBGg/Frame-51027.png)
+![App Screenshot](https://i.postimg.cc/hhF5YqVx/ongoing.png)
+![App Screenshot](https://i.postimg.cc/BtWVzG2F/tracking.png)
 
 An elegant, automated, and privacy-focused browser extension that tracks your anime progress in the background and updates your AniList profile seamlessly. 
 
