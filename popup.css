@@ -1,0 +1,228 @@
+body {
+  background-color: #111A26;
+  color: #9EB3C8;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  width: 340px; 
+  min-height: 480px;
+  margin: 0;
+  padding: 15px;
+  box-sizing: border-box;
+  position: relative;
+}
+
+h1, h2, h3 { margin: 0 0 10px 0; color: #ffffff; }
+
+button {
+  border: none; border-radius: 4px; cursor: pointer;
+  font-weight: bold; transition: background-color 0.1s, color 0.1s;
+}
+
+.primary-btn { background-color: #9EB3C8; color: #111A26; padding: 10px 15px; width: 100%; }
+.primary-btn:hover { background-color: #ffffff; }
+
+.secondary-btn { background-color: transparent; color: #9EB3C8; border: 1px solid #9EB3C8; padding: 5px 10px; }
+.secondary-btn:hover { background-color: #9EB3C8; color: #111A26; }
+
+#login-view {
+  display: flex; flex-direction: column; justify-content: center;
+  align-items: center; height: 450px; text-align: center;
+}
+.login-title { font-size: 24px; margin-bottom: 5px; }
+.login-subtitle { font-size: 13px; opacity: 0.8; margin-bottom: 25px; }
+
+select, input {
+  background-color: #0b1119; color: #9EB3C8; border: 1px solid #9EB3C8;
+  padding: 5px; border-radius: 4px; width: 100%; margin-top: 5px; box-sizing: border-box;
+}
+
+#search-input { margin-bottom: 15px; display: block; }
+#search-input.hidden { display: none !important; }
+
+.header {
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid #9EB3C8; padding-bottom: 10px; margin-bottom: 15px;
+}
+
+#user-profile {
+  display: flex; align-items: center; gap: 10px; cursor: pointer;
+  padding: 4px 8px 4px 4px; border-radius: 6px; transition: background-color 0.2s;
+}
+#user-profile:hover { background-color: #1a2636; }
+#user-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
+.profile-text { display: flex; flex-direction: column; }
+#user-profile h2 { margin: 0; font-size: 15px; }
+#current-view-label { font-size: 11px; color: #E5C07B; margin-top: 2px; }
+
+#filter-dropdown {
+  position: absolute; top: 60px; left: 15px; background-color: #1a2636;
+  border: 1px solid #9EB3C8; border-radius: 6px; z-index: 100; width: 200px;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.6); overflow: hidden;
+}
+.filter-option { padding: 10px 12px; cursor: pointer; font-size: 13px; color: #ffffff; transition: background-color 0.1s; }
+.filter-option:hover { background-color: #9EB3C8; color: #111A26; font-weight: bold; }
+
+.day-tabs-container {
+  display: flex; justify-content: space-between; margin-bottom: 15px;
+  background-color: #0b1119; border-radius: 6px; padding: 5px;
+}
+.day-tab {
+  background: transparent; color: #9EB3C8; border: none; padding: 5px 0;
+  flex: 1; text-align: center; border-radius: 4px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; font-weight: normal; position: relative;
+}
+.day-tab:hover { background-color: #1a2636; }
+.day-tab.active { background-color: #ffffff; color: #111A26; font-weight: bold; }
+.day-tab-name { font-size: 10px; margin-bottom: 2px; }
+.day-tab-date { font-size: 14px; }
+
+.tab-badge {
+  position: absolute; top: -4px; right: -2px; background-color: #E5C07B; color: #111A26;
+  font-size: 9px; font-weight: bold; border-radius: 50%; width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center; border: 2px solid #0b1119;
+}
+.tab-badge.check { background-color: #98C379; color: #111A26; font-size: 10px; }
+
+#anime-list { max-height: 380px; overflow-y: auto; }
+.anime-list-item { display: flex; align-items: center; margin-bottom: 10px; cursor: pointer; padding: 5px; border-radius: 4px; }
+.anime-list-item:hover { background-color: #0b1119; }
+
+.quick-add-btn { background-color: #E5C07B; color: #111A26; padding: 6px 10px; font-size: 14px; border-radius: 4px; margin-left: 10px; }
+.quick-add-btn:hover { background-color: #ffffff; }
+.quick-add-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.placeholder-text { text-align: center; font-style: italic; opacity: 0.7; }
+
+/* Feature #2: Skeleton Loader Styles */
+.skeleton-item { display: flex; gap: 10px; margin-bottom: 10px; padding: 5px; }
+.skeleton-img { width: 40px; height: 55px; border-radius: 4px; background: #1a2636; flex-shrink: 0; }
+.skeleton-text { flex-grow: 1; display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+.skeleton-line { height: 12px; background: #1a2636; border-radius: 4px; }
+.skeleton-line.short { width: 50%; }
+.shimmer { 
+  animation: shimmer 1.5s infinite linear; 
+  background: linear-gradient(to right, #0b1119 4%, #1a2636 25%, #0b1119 36%); 
+  background-size: 1000px 100%; 
+}
+@keyframes shimmer { 0% { background-position: -1000px 0; } 100% { background-position: 1000px 0; } }
+
+/* Feature #9: Exact Air Time Text */
+.countdown-text { font-size: 11px; color: #E5C07B; margin-top: 3px; font-weight: bold; }
+.exact-air-time { font-size: 10px; color: #9EB3C8; opacity: 0.8; margin-top: 1px; }
+
+.detail-header { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; }
+#detail-image { width: 70px; height: 100px; object-fit: cover; border-radius: 6px; cursor: pointer; transition: transform 0.2s; }
+#detail-image:hover { transform: scale(1.05); }
+
+.update-form label { display: block; margin-bottom: 15px; }
+.episode-controls { display: flex; align-items: center; gap: 10px; }
+#save-btn { margin-top: 10px; }
+#back-btn { margin-bottom: 15px; }
+
+.hidden { display: none !important; }
+
+#fullscreen-modal {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(11, 17, 25, 0.95);
+  z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer;
+}
+#modal-img { max-width: 90%; max-height: 85%; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+.modal-close-text { margin-top: 15px; font-size: 12px; opacity: 0.7; }
+
+/* ADD THIS TO THE BOTTOM OF YOUR popup.css */
+
+/* Feature: Auto-Detect View */
+#autodetect-view {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding: 10px 0;
+}
+
+.autodetect-header {
+  color: #E5C07B;
+  font-size: 14px;
+  text-align: center;
+  margin-bottom: 5px;
+}
+
+.autodetect-card {
+  display: flex;
+  background-color: #0b1119;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #E5C07B;
+  align-items: center;
+  gap: 15px;
+}
+
+#autodetect-img {
+  width: 50px;
+  height: 70px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.autodetect-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+#autodetect-title {
+  font-weight: bold;
+  font-size: 14px;
+  color: #ffffff;
+}
+
+#autodetect-ep {
+  font-size: 13px;
+  color: #9EB3C8;
+}
+
+.autodetect-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#autodetect-cancel-btn {
+  width: 100%;
+  border-color: #1a2636;
+  color: #9EB3C8;
+}
+
+#autodetect-cancel-btn:hover {
+  background-color: #1a2636;
+}
+
+/* Debug Video Progress Bar */
+#video-progress-container {
+  width: 100%;
+  background-color: #1a2636;
+  border: 1px solid #9EB3C8;
+  border-radius: 4px;
+  height: 16px;
+  position: relative;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+#video-progress-bar {
+  height: 100%;
+  background-color: #98C379; /* AniList Green */
+  width: 0%;
+  transition: width 0.5s linear;
+}
+
+#video-progress-text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  text-align: center;
+  font-size: 10px;
+  line-height: 14px;
+  color: #ffffff;
+  font-weight: bold;
+  text-shadow: 1px 1px 2px #000;
+  pointer-events: none;
+}

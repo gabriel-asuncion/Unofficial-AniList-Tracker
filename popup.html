@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AniList Quick Update</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  
+  <div id="login-view">
+    <div class="login-content">
+      <h1 class="login-title">AniList Update</h1>
+      <p class="login-subtitle">Your quick anime tracking companion.</p>
+      <button id="login-btn" class="primary-btn">Log In with AniList</button>
+    </div>
+  </div>
+
+  <div id="app-view" class="hidden">
+    <div class="header">
+      <div id="user-profile">
+        <img id="user-avatar" src="" alt="Avatar">
+        <div class="profile-text">
+          <h2 id="user-name">User</h2>
+          <div id="current-view-label">Schedule (My List) ▾</div>
+        </div>
+      </div>
+      <div>
+        <button id="settings-btn" class="secondary-btn" title="Settings">⚙️</button>
+        <button id="logout-btn" class="secondary-btn">Log Out</button>
+      </div>
+    </div>
+    
+    <div id="filter-dropdown" class="hidden">
+      <div class="filter-option" data-value="SCHEDULE">Schedule (My List)</div>
+      <div class="filter-option" data-value="SCHEDULE_ALL">Schedule (All Airing)</div>
+      <div class="filter-option" data-value="CURRENT">Watching</div>
+      <div class="filter-option" data-value="PLANNING">Planning</div>
+      <div class="filter-option" data-value="UPCOMING">Upcoming (Next Season)</div>
+    </div>
+
+    <!-- 1. AUTO-DETECT VIEW -->
+    <div id="autodetect-view" class="hidden">
+      <!-- DEBUG PROGRESS BAR -->
+      <div id="video-progress-container" title="Live video progress">
+        <div id="video-progress-bar"></div>
+        <div id="video-progress-text">Video Progress: 0.0%</div>
+      </div>
+
+      <h3 class="autodetect-header">We noticed you're watching...</h3>
+      <div class="autodetect-card">
+        <img id="autodetect-img" src="" alt="Cover">
+        <div class="autodetect-info">
+          <div id="autodetect-title">Anime Title</div>
+          <div id="autodetect-ep">Episode X</div>
+        </div>
+      </div>
+      <div class="autodetect-actions">
+        <button id="autodetect-confirm-btn" class="primary-btn hidden">Update Progress</button>
+        <button id="skip-intro-btn" class="secondary-btn" style="border-color: #E5C07B; color: #E5C07B;">⏭ Skip 1:30</button>
+        <button id="autodetect-cancel-btn" class="secondary-btn">View My Anime List</button>
+      </div>
+    </div>
+
+    <!-- 2. WHITELIST VIEW -->
+    <div id="whitelist-view" class="hidden">
+      <h3 class="autodetect-header">Enable Auto-Tracking?</h3>
+      <div class="autodetect-card" style="flex-direction: column; text-align: center; gap: 8px;">
+        <p style="font-size: 13px; margin: 0; color: #ffffff;">We noticed you are watching anime on</p>
+        <p style="font-size: 14px; margin: 0; color: #E5C07B; font-weight: bold;" id="whitelist-hostname"></p>
+        <p style="font-size: 11px; margin: 5px 0 0 0; opacity: 0.8;">Whitelist this site to enable auto-tracking.</p>
+      </div>
+      <div class="autodetect-actions" style="margin-top: 15px;">
+        <button id="whitelist-confirm-btn" class="primary-btn">Whitelist & Reload</button>
+        <button id="whitelist-cancel-btn" class="secondary-btn">Skip for now</button>
+      </div>
+    </div>
+
+    <div id="settings-view" class="hidden">
+      <button id="settings-back-btn" class="secondary-btn" style="margin-bottom: 15px;">← Back</button>
+      <h3 style="margin-bottom: 20px;">Settings</h3>
+
+      <div style="margin-bottom: 25px;">
+        <label style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+          <span>Auto-Track Threshold</span>
+          <span id="threshold-display" style="color: #E5C07B; font-weight: bold;">80%</span>
+        </label>
+        <input type="range" id="threshold-slider" min="10" max="100" value="80" style="cursor: pointer;">
+        <p style="font-size: 11px; opacity: 0.7; margin-top: 5px;">The video percentage required to trigger an auto-update.</p>
+      </div>
+
+      <div>
+        <h4 style="margin-bottom: 10px;">Whitelisted Sites</h4>
+        <div id="whitelist-manager-list" style="background-color: #0b1119; border: 1px solid #1a2636; border-radius: 6px; max-height: 150px; overflow-y: auto; padding: 5px;">
+          </div>
+      </div>
+    </div>
+
+    <!-- 3. MAIN LIST VIEW -->
+    <div id="main-view">
+      <input type="text" id="search-input" placeholder="Search anime list..." class="hidden">
+      <div id="day-tabs" class="day-tabs-container hidden"></div>
+      <div id="anime-list"></div>
+    </div>
+  </div>
+
+  <div id="detail-view" class="hidden">
+    <button id="back-btn">← Back</button>
+    <div class="detail-header">
+      <img id="detail-image" src="" alt="Cover" title="Click to expand">
+      <h3 id="anime-title">Anime Title</h3>
+    </div>
+    <div class="update-form">
+      <label>Status:
+        <select id="status-select">
+          <option value="CURRENT">Watching</option>
+          <option value="COMPLETED">Completed</option>
+          <option value="DROPPED">Dropped</option>
+          <option value="PAUSED">Paused</option>
+        </select>
+      </label>
+      <label>Episode:
+        <div class="episode-controls">
+          <input type="number" id="episode-input" min="0">
+          <span id="total-episodes">/ ?</span>
+        </div>
+      </label>
+      <label>Score (0-100):
+        <input type="number" id="score-input" min="0" max="100" placeholder="e.g., 85">
+      </label>
+      <button id="save-btn" class="primary-btn">Save Update</button>
+    </div>
+  </div>
+
+  <div id="fullscreen-modal" class="hidden">
+    <img id="modal-img" src="" alt="Fullscreen Cover">
+    <div class="modal-close-text">Click anywhere to close</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
