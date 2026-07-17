@@ -1,0 +1,5 @@
+# Ignore the secret configuration file
+config.js
+
+# It is good practice to leave an example file for other developers
+# You can create an empty 'config.example.js' and push that instead

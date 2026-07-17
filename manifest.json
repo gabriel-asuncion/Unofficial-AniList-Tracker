@@ -27,7 +27,8 @@
   ],
   "host_permissions": [
     "https://graphql.anilist.co/*",
-    "https://anilist.co/*"
+    "https://anilist.co/*",
+    "https://*.supabase.co/*"
   ],
   "background": {
     "service_worker": "background.js"

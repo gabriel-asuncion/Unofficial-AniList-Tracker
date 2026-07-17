@@ -1,4 +1,4 @@
-const CLIENT_ID = '45996'; // <-- Remember your Client ID!
+const CLIENT_ID = ANILIST_CLIENT_ID; // Directly reads the global variable from config.js
 let accessToken = null;
 let userId = null;
 let currentSelectedAnime = null; 
@@ -13,19 +13,24 @@ let currentThreshold = 80;
 // Auto-detect variables
 let detectedMedia = null;
 let detectedEpisode = null;
+let hiddenMediaIds = [];
 
 document.addEventListener('DOMContentLoaded', () => {
   // 1. INITIAL BOOT: Load token and threshold
-  chrome.storage.local.get(['anilistToken', 'trackingThreshold'], (result) => {
-    if (result.trackingThreshold) currentThreshold = result.trackingThreshold;
-    
-    if (result.anilistToken) {
-      accessToken = result.anilistToken;
-      updateAuthUI(true);
-      initializeApp(); 
-    } else {
-      updateAuthUI(false);
-    }
+  // 1. INITIAL BOOT: Load token, threshold, and hidden titles
+  chrome.storage.local.get(['anilistToken', 'trackingThreshold'], (localRes) => {
+    chrome.storage.sync.get(['hiddenMediaIds'], (syncRes) => {
+      if (localRes.trackingThreshold) currentThreshold = localRes.trackingThreshold;
+      if (syncRes.hiddenMediaIds) hiddenMediaIds = syncRes.hiddenMediaIds;
+      
+      if (localRes.anilistToken) {
+        accessToken = localRes.anilistToken;
+        updateAuthUI(true);
+        initializeApp(); 
+      } else {
+        updateAuthUI(false);
+      }
+    });
   });
 
   // --- CORE LISTENERS ---
@@ -66,6 +71,23 @@ document.addEventListener('DOMContentLoaded', () => {
       if (dropdown) dropdown.classList.add('hidden');
     }
   });
+
+  // --- NEW: Hide Title Toggle ---
+  const hideToggle = document.getElementById('hide-title-toggle');
+  if (hideToggle) {
+    hideToggle.addEventListener('change', (e) => {
+      if (!currentSelectedAnime) return;
+      const id = currentSelectedAnime.media.id;
+      
+      if (e.target.checked) {
+        if (!hiddenMediaIds.includes(id)) hiddenMediaIds.push(id);
+      } else {
+        hiddenMediaIds = hiddenMediaIds.filter(hid => hid !== id);
+      }
+      
+      chrome.storage.sync.set({ hiddenMediaIds: hiddenMediaIds });
+    });
+  }
 
   const statusSelect = document.getElementById('status-select');
   if (statusSelect) {
@@ -481,7 +503,12 @@ function showAutoDetectView(media, ep) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+// NEW: Added 'sender' to the parameters
+chrome.runtime.onMessage.addListener((message, sender) => {
+  
+  // NEW: Ignore background tab broadcasts to stop the popup UI from flickering
+  if (sender && sender.tab && !sender.tab.active) return;
+
   if (message.action === "LIVE_VIDEO_PROGRESS") {
     const pct = message.progress.toFixed(1);
     const progressBar = document.getElementById('video-progress-bar');
@@ -497,7 +524,7 @@ chrome.runtime.onMessage.addListener((message) => {
       const epTextEl = document.getElementById('autodetect-ep');
       if (epTextEl && !epTextEl.textContent.includes("✅") && !epTextEl.textContent.includes("already at")) {
         epTextEl.textContent = `✅ ${currentThreshold}% Reached! Auto-updated successfully.`;
-        epTextEl.style.color = "#98C379"; 
+        epTextEl.style.color = "#4cca51"; 
       }
     }
   }
@@ -804,10 +831,11 @@ function formatCountdown(seconds) {
 }
 
 function renderAnimeList(entries) {
+  const visibleEntries = entries.filter(e => !hiddenMediaIds.includes(e.media.id));
   const container = document.getElementById('anime-list');
   container.innerHTML = ''; 
 
-  if (entries.length === 0) {
+  if (visibleEntries.length === 0) {
     container.innerHTML = '<p class="placeholder-text">No anime scheduled/found.</p>';
     return;
   }
@@ -973,6 +1001,10 @@ function openDetailView(entry) {
   document.getElementById('main-view').classList.add('hidden');
   document.getElementById('detail-view').classList.remove('hidden');
   document.getElementById('save-btn').textContent = 'Save Update';
+  const hideToggle = document.getElementById('hide-title-toggle');
+  if (hideToggle) {
+    hideToggle.checked = hiddenMediaIds.includes(entry.media.id);
+  }
 }
 
 function handleEpisodeInput(e) {

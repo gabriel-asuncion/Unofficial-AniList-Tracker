@@ -27,7 +27,7 @@
       </div>
       <div style="display: flex; gap: 8px; align-items: stretch;">
         <button id="settings-btn" class="secondary-btn" title="Settings" style="display: flex; align-items: center; justify-content: center;">⚙️</button>
-        <button id="logout-btn" class="secondary-btn">Log Out</button>
+        <!-- Log Out button removed from here -->
       </div>
     </div>
     
@@ -94,6 +94,7 @@
         <div id="whitelist-manager-list" style="background-color: #0b1119; border: 1px solid #1a2636; border-radius: 6px; max-height: 150px; overflow-y: auto; padding: 5px;">
           </div>
       </div>
+      <button id="logout-btn" class="secondary-btn" style="width: 100%; margin-top: 20px; border-color: #e06c75; color: #e06c75;">Log Out of AniList</button>
     </div>
 
     <!-- 3. MAIN LIST VIEW -->
@@ -111,6 +112,11 @@
       <h3 id="anime-title">Anime Title</h3>
     </div>
     <div class="update-form">
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; color: #9fadbd; margin-bottom: 20px;">
+        <input type="checkbox" id="hide-title-toggle">
+        👁️ Hide this anime from my schedule
+      </label>
+      
       <label>Status:
         <select id="status-select">
           <option value="CURRENT">Watching</option>
@@ -137,6 +143,8 @@
     <div class="modal-close-text">Click anywhere to close</div>
   </div>
 
+  <!-- NEW: Load the environment variables first -->
+  <script src="config.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
