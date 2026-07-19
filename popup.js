@@ -227,8 +227,14 @@ function handleLoginClick() {
   const originalText = btn.textContent;
   btn.textContent = "Connecting...";
 
-  const authUrl = `https://anilist.co/api/v2/oauth/authorize?client_id=${CLIENT_ID}&response_type=token`;
+  const safeClientId = typeof ANILIST_CLIENT_ID !== 'undefined' ? ANILIST_CLIENT_ID : '45996';
   
+  // FIXED: We removed the redirect_uri parameter. 
+  // AniList will automatically use the exact URL you saved in your dashboard!
+  const authUrl = `https://anilist.co/api/v2/oauth/authorize?client_id=${safeClientId}&response_type=token`;
+  
+  console.log("Attempting to launch WebAuthFlow with URL:", authUrl);
+
   chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (redirectUrlResult) => {
     if (chrome.runtime.lastError) {
       console.error("Auth Error:", chrome.runtime.lastError.message);
@@ -250,7 +256,7 @@ function handleLoginClick() {
       chrome.storage.local.set({ anilistToken: accessToken }, () => {
         updateAuthUI(true);
         initializeApp();
-        btn.textContent = originalText; // reset for next time
+        btn.textContent = originalText; 
       });
     } else {
       btn.textContent = "Failed to get token";

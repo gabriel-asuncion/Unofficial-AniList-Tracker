@@ -18,11 +18,12 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   let trackedVideo = null;
   let currentVideoSrc = ""; 
   let userThreshold = result.trackingThreshold || 80; 
+  let currentUrl = location.href; 
   
   // OTG Sync Variables
   let otgLoaded = false;
   let otgSaveLock = false; 
-  let resolvedOtgData = null; // NEW: Holds the database structure 
+  let resolvedOtgData = null; 
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.trackingThreshold) userThreshold = changes.trackingThreshold.newValue;
@@ -43,6 +44,29 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       return; 
     }
 
+    // 1. SPA Navigation Detector (URL changes)
+    if (location.href !== currentUrl) {
+      console.log("[AniList Quick Update] URL changed! Resetting tracker for new episode.");
+      currentUrl = location.href;
+      trackedVideo = null;        
+      currentVideoSrc = "";       
+      hasTriggeredUpdate = false; 
+      otgLoaded = false;          
+      resolvedOtgData = null;     
+    }
+
+    // 2. NEW: Aggressive Ghost Video Detector
+    // If the site swaps the video player WITHOUT changing the URL, this catches it!
+    if (trackedVideo && !trackedVideo.isConnected) {
+      console.log("[AniList Quick Update] Ghost video detected! Hunting for the new player...");
+      trackedVideo = null;
+      currentVideoSrc = "";
+      hasTriggeredUpdate = false;
+      otgLoaded = false;
+      resolvedOtgData = null;
+    }
+
+    // 3. Find the video if we don't have one
     if (!trackedVideo || isNaN(trackedVideo.duration) || trackedVideo.duration < 300) {
       const videos = getDeepVideos(document);
       let maxDuration = 0;
@@ -57,6 +81,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       
       if (maxDuration > 300) {
         trackedVideo = longestVideo;
+        console.log("[AniList Quick Update] Found new video player!");
       }
     }
 
@@ -66,7 +91,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         currentVideoSrc = trackedVideo.src;
         hasTriggeredUpdate = false; 
         otgLoaded = false; 
-        resolvedOtgData = null; // Reset for new episodes
+        resolvedOtgData = null; 
       }
 
       if (otgSaveLock) return;
@@ -79,7 +104,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
           currentTime: trackedVideo.currentTime,
           isOtgLoaded: otgLoaded,
           resolvedData: resolvedOtgData,
-          hasTriggeredUpdate: hasTriggeredUpdate // NEW: Tell background if we are done!
+          hasTriggeredUpdate: hasTriggeredUpdate 
         }, (response) => {
           if (chrome.runtime.lastError) return;
           
@@ -136,7 +161,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     else if (request.action === "SKIP_TIME" && trackedVideo) {
       trackedVideo.currentTime += request.amount;
     }
-    // --- NEW: Catch the Completion Trigger ---
     else if (request.action === "SHOW_RATING_MODAL") {
       showRatingModal(request.mediaId, request.animeName);
     }
@@ -151,22 +175,10 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     toast.id = 'anilist-quick-update-toast';
     
     Object.assign(toast.style, {
-      position: 'fixed',
-      top: '20px',
-      right: '-400px', 
-      backgroundColor: '#1f1f1f', 
-      color: '#ffffff',
-      border: '1px solid #333',
-      padding: '14px 18px',
-      borderRadius: '10px',
-      boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-      zIndex: '2147483647',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      display: 'flex',
-      alignItems: 'flex-start',
-      gap: '14px',
-      width: '340px',
-      transition: 'right 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+      position: 'fixed', top: '20px', right: '-400px', backgroundColor: '#1f1f1f', color: '#ffffff',
+      border: '1px solid #333', padding: '14px 18px', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+      zIndex: '2147483647', fontFamily: 'system-ui, -apple-system, sans-serif', display: 'flex',
+      alignItems: 'flex-start', gap: '14px', width: '340px', transition: 'right 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
       boxSizing: 'border-box'
     });
 
@@ -180,9 +192,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     const closeSvg = `<svg style="cursor:pointer; opacity:0.5; transition:opacity 0.2s;" width="18" height="18" fill="none" stroke="#aaa" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
 
     toast.innerHTML = `
-      <div style="flex-shrink: 0; margin-top: 1px;">
-        ${icons[type] || icons.info}
-      </div>
+      <div style="flex-shrink: 0; margin-top: 1px;">${icons[type] || icons.info}</div>
       <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px;">
         <span style="font-size: 15px; font-weight: 600; color: #fff; line-height: 1.2; letter-spacing: 0.3px;">${title}</span>
         <span style="font-size: 13px; font-weight: 400; color: #aaa; line-height: 1.4;">${description}</span>
@@ -197,15 +207,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     const closeBtn = toast.querySelector('.toast-close-btn');
     closeBtn.addEventListener('mouseenter', () => closeBtn.firstElementChild.style.opacity = '1');
     closeBtn.addEventListener('mouseleave', () => closeBtn.firstElementChild.style.opacity = '0.5');
-    closeBtn.addEventListener('click', () => {
-      toast.style.right = '-400px';
-      setTimeout(() => toast.remove(), 400);
-    });
+    closeBtn.addEventListener('click', () => { toast.style.right = '-400px'; setTimeout(() => toast.remove(), 400); });
 
-    requestAnimationFrame(() => {
-      setTimeout(() => { toast.style.right = '20px'; }, 100);
-    });
-
+    requestAnimationFrame(() => { setTimeout(() => { toast.style.right = '20px'; }, 100); });
     setTimeout(() => {
       if (document.body.contains(toast)) {
         toast.style.right = '-400px';
@@ -214,86 +218,78 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     }, 5000); 
   }
 });
-// --- NEW: In-Page Completion & Rating UI ---
-  function showRatingModal(mediaId, animeName) {
-    // Remove if already exists
-    const existing = document.getElementById('anilist-rating-modal-container');
-    if (existing) existing.remove();
 
-    const container = document.createElement('div');
-    container.id = 'anilist-rating-modal-container';
-    Object.assign(container.style, {
-      position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
-      backgroundColor: 'rgba(0, 0, 0, 0.85)', zIndex: '2147483647',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
-    });
+function showRatingModal(mediaId, animeName) {
+  const existing = document.getElementById('anilist-rating-modal-container');
+  if (existing) existing.remove();
 
-    const modal = document.createElement('div');
-    Object.assign(modal.style, {
-      backgroundColor: '#1f1f1f', border: '1px solid #333',
-      padding: '24px', borderRadius: '12px', width: '320px',
-      boxShadow: '0 10px 40px rgba(0,0,0,0.9)', color: '#fff',
-      display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'center'
-    });
+  const container = document.createElement('div');
+  container.id = 'anilist-rating-modal-container';
+  Object.assign(container.style, {
+    position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)', zIndex: '2147483647',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: 'system-ui, -apple-system, sans-serif'
+  });
 
-    modal.innerHTML = `
-      <div>
-        <h2 style="margin: 0 0 8px 0; font-size: 20px; color: #4cca51;">Series Completed! 🎉</h2>
-        <p style="margin: 0; font-size: 14px; color: #aaa; line-height: 1.4;">You finished <b style="color: #fff;">${animeName}</b>. How would you rate it?</p>
-      </div>
-      <input type="number" id="anilist-score-input" min="0" max="100" placeholder="Score (0-100)" style="
-        background-color: #0b1119; color: #fff; border: 1px solid #333;
-        padding: 12px; border-radius: 8px; font-size: 18px; text-align: center;
-        outline: none; width: 100%; box-sizing: border-box; font-weight: bold;
-      ">
-      <div style="display: flex; gap: 10px; margin-top: 5px;">
-        <button id="anilist-skip-rating" style="
-          flex: 1; padding: 12px; background: transparent; color: #aaa;
-          border: 1px solid #555; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s;
-        ">Skip</button>
-        <button id="anilist-submit-rating" style="
-          flex: 1; padding: 12px; background: #3db4f2; color: #fff;
-          border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s;
-        ">Submit</button>
-      </div>
-    `;
+  const modal = document.createElement('div');
+  Object.assign(modal.style, {
+    backgroundColor: '#1f1f1f', border: '1px solid #333',
+    padding: '24px', borderRadius: '12px', width: '320px',
+    boxShadow: '0 10px 40px rgba(0,0,0,0.9)', color: '#fff',
+    display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'center'
+  });
 
-    container.appendChild(modal);
-    document.body.appendChild(container);
+  modal.innerHTML = `
+    <div>
+      <h2 style="margin: 0 0 8px 0; font-size: 20px; color: #4cca51;">Series Completed! 🎉</h2>
+      <p style="margin: 0; font-size: 14px; color: #aaa; line-height: 1.4;">You finished <b style="color: #fff;">${animeName}</b>. How would you rate it?</p>
+    </div>
+    <input type="number" id="anilist-score-input" min="0" max="100" placeholder="Score (0-100)" style="
+      background-color: #0b1119; color: #fff; border: 1px solid #333;
+      padding: 12px; border-radius: 8px; font-size: 18px; text-align: center;
+      outline: none; width: 100%; box-sizing: border-box; font-weight: bold;
+    ">
+    <div style="display: flex; gap: 10px; margin-top: 5px;">
+      <button id="anilist-skip-rating" style="
+        flex: 1; padding: 12px; background: transparent; color: #aaa;
+        border: 1px solid #555; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s;
+      ">Skip</button>
+      <button id="anilist-submit-rating" style="
+        flex: 1; padding: 12px; background: #3db4f2; color: #fff;
+        border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s;
+      ">Submit</button>
+    </div>
+  `;
 
-    const skipBtn = document.getElementById('anilist-skip-rating');
-    const submitBtn = document.getElementById('anilist-submit-rating');
-    const scoreInput = document.getElementById('anilist-score-input');
+  container.appendChild(modal);
+  document.body.appendChild(container);
 
-    // Add slight hover effects
-    skipBtn.addEventListener('mouseenter', () => skipBtn.style.color = '#fff');
-    skipBtn.addEventListener('mouseleave', () => skipBtn.style.color = '#aaa');
-    submitBtn.addEventListener('mouseenter', () => submitBtn.style.backgroundColor = '#2c9ad1');
-    submitBtn.addEventListener('mouseleave', () => submitBtn.style.backgroundColor = '#3db4f2');
+  const skipBtn = document.getElementById('anilist-skip-rating');
+  const submitBtn = document.getElementById('anilist-submit-rating');
+  const scoreInput = document.getElementById('anilist-score-input');
 
-    skipBtn.addEventListener('click', () => {
+  skipBtn.addEventListener('mouseenter', () => skipBtn.style.color = '#fff');
+  skipBtn.addEventListener('mouseleave', () => skipBtn.style.color = '#aaa');
+  submitBtn.addEventListener('mouseenter', () => submitBtn.style.backgroundColor = '#2c9ad1');
+  submitBtn.addEventListener('mouseleave', () => submitBtn.style.backgroundColor = '#3db4f2');
+
+  skipBtn.addEventListener('click', () => {
+    container.remove();
+  });
+
+  submitBtn.addEventListener('click', () => {
+    const score = parseInt(scoreInput.value, 10);
+    if (isNaN(score) || score < 0 || score > 100) {
+      scoreInput.style.borderColor = '#e74c3c';
+      return;
+    }
+    
+    submitBtn.textContent = 'Saving...';
+    submitBtn.disabled = true;
+
+    chrome.runtime.sendMessage({ action: "SAVE_ANIME_SCORE", mediaId, score }, (response) => {
       container.remove();
-      showInPageToast('info', 'Completed', `${animeName} has been marked as completed.`);
     });
-
-    submitBtn.addEventListener('click', () => {
-      const score = parseInt(scoreInput.value, 10);
-      if (isNaN(score) || score < 0 || score > 100) {
-        scoreInput.style.borderColor = '#e74c3c';
-        return;
-      }
-      
-      submitBtn.textContent = 'Saving...';
-      submitBtn.disabled = true;
-
-      chrome.runtime.sendMessage({ action: "SAVE_ANIME_SCORE", mediaId, score }, (response) => {
-        container.remove();
-        if (response && response.success) {
-          showInPageToast('success', 'Rating Saved', `You rated ${animeName} a ${score}/100!`);
-        } else {
-          showInPageToast('error', 'Error', `Failed to save rating for ${animeName}.`);
-        }
-      });
-    });
-  }
+  });
+}

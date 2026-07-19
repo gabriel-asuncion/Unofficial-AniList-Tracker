@@ -89,6 +89,27 @@ async function deleteOtgTimeFromSupabase(userId, mediaId, episode) {
   }
 }
 
+// --- NEW: Housekeeping function for skipped episodes ---
+async function deleteOldEpisodesFromSupabase(userId, mediaId, currentEpisode) {
+  try {
+    // We use "episode=lt.${currentEpisode}" to target only older episodes
+    const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&media_id=eq.${mediaId}&episode=lt.${currentEpisode}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      }
+    });
+    
+    if (res.ok) {
+      console.log(`[Supabase Housekeeping]: Cleared orphaned saves before Ep ${currentEpisode}`);
+    }
+  } catch (error) {
+    console.error("[Supabase Housekeeping Failed]:", error);
+  }
+}
+
 async function findAniListMedia(tabTitle) {
   const storage = await chrome.storage.local.get(['anilistToken']);
   const token = storage.anilistToken;
@@ -149,41 +170,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const dynamicThreshold = message.threshold || 80;
     const currentPct = Math.floor(message.progress);
     
-    if (currentPct > 0 && currentPct < dynamicThreshold) {
-      chrome.action.setBadgeBackgroundColor({ color: '#3db4f2' }); 
-      chrome.action.setBadgeText({ text: `${currentPct}%` }); 
+    if (!message.hasTriggeredUpdate) {
+      if (currentPct > 0 && currentPct < dynamicThreshold) {
+        chrome.action.setBadgeBackgroundColor({ color: '#3db4f2' }); 
+        chrome.action.setBadgeText({ text: `${currentPct}%` }); 
+      } else if (currentPct >= dynamicThreshold) {
+        chrome.action.setBadgeBackgroundColor({ color: '#f39c12' }); 
+        chrome.action.setBadgeText({ text: `...` }); 
+      }
     }
 
     if (message.isOtgLoaded === false && sender.tab && sender.tab.title) {
       (async () => {
-        const result = await findAniListMedia(sender.tab.title);
-        let storage = await chrome.storage.local.get(['anilistUserId']);
-        let userId = storage.anilistUserId;
+        try {
+          // --- NEW: Strict try/catch wrapper ensures the channel always closes ---
+          const result = await findAniListMedia(sender.tab.title);
+          let storage = await chrome.storage.local.get(['anilistUserId']);
+          let userId = storage.anilistUserId;
 
-        if (!userId && result && result.token) {
-          try {
-            const viewerData = await apiRequest(`query { Viewer { id } }`, {}, result.token);
-            userId = viewerData.data?.Viewer?.id;
-            if (userId) await chrome.storage.local.set({ anilistUserId: userId });
-          } catch(e) {}
-        }
-
-        if (result && result.media && userId) {
-          const mediaId = result.media.id;
-          const episode = result.episode;
-          const cacheKey = `${userId}_${mediaId}_${episode}`;
-
-          lastSaveTimes[cacheKey] = Date.now(); 
-          
-          const savedTime = await getOtgTimeFromSupabase(userId, mediaId, episode);
-
-          if (savedTime && savedTime > 10) {
-            sendResponse({ otgTime: savedTime, resolvedData: { userId, mediaId, episode, cacheKey } });
-          } else {
-            sendResponse({ otgTime: null, resolvedData: { userId, mediaId, episode, cacheKey } });
+          if (!userId && result && result.token) {
+            try {
+              const viewerData = await apiRequest(`query { Viewer { id } }`, {}, result.token);
+              userId = viewerData.data?.Viewer?.id;
+              if (userId) await chrome.storage.local.set({ anilistUserId: userId });
+            } catch(e) {
+              console.error("[AniList Quick Update] Failed to fetch Viewer ID", e);
+            }
           }
-        } else {
-          sendResponse({ otgTime: null });
+
+          if (result && result.media && userId) {
+            const mediaId = result.media.id;
+            const episode = result.episode;
+            const cacheKey = `${userId}_${mediaId}_${episode}`;
+
+            deleteOldEpisodesFromSupabase(userId, mediaId, episode);
+
+            lastSaveTimes[cacheKey] = Date.now(); 
+            
+            const savedTime = await getOtgTimeFromSupabase(userId, mediaId, episode);
+
+            if (savedTime && savedTime > 10) {
+              sendResponse({ otgTime: savedTime, resolvedData: { userId, mediaId, episode, cacheKey } });
+            } else {
+              sendResponse({ otgTime: null, resolvedData: { userId, mediaId, episode, cacheKey } });
+            }
+          } else {
+            sendResponse({ otgTime: null });
+          }
+        } catch (error) {
+          // If a network error causes a crash, gracefully catch it and close the channel!
+          console.error("[AniList Quick Update] Async listener crashed:", error);
+          sendResponse({ otgTime: null }); 
         }
       })();
       return true; // Keep channel open for async fetch
@@ -192,7 +229,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { userId, mediaId, episode, cacheKey } = message.resolvedData;
       const now = Date.now();
       
-      // FIXED: Only save to database if the episode is NOT finished
       if (!message.hasTriggeredUpdate) {
         if (sender.tab && sender.tab.id) {
           activeSessions[sender.tab.id] = { userId, mediaId, episode, time: message.currentTime };
@@ -205,6 +241,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       sendResponse({ otgTime: null });
       return false; // Synchronous reply
+      
+    } else {
+      // --- NEW: Catch-all safety net for stray messages ---
+      sendResponse({ otgTime: null });
+      return false; 
     }
     
   } else if (message.action === "SAVE_ANIME_SCORE") {
@@ -230,38 +271,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function processAutoUpdate(tabTitle, tabId) {
   try {
     const result = await findAniListMedia(tabTitle);
-    if (!result || !result.media) return;
+    
+    // If we can't find the anime, show an error badge so it doesn't get stuck on "..."
+    if (!result || !result.media) {
+      chrome.action.setBadgeBackgroundColor({ color: '#e74c3c' });
+      chrome.action.setBadgeText({ text: 'ERR' });
+      return;
+    }
 
     const { media, episode, token } = result;
     const currentProg = media.mediaListEntry ? media.mediaListEntry.progress : 0;
-    
-    if (currentProg >= episode) return; 
-
-    let newStatus = 'CURRENT';
-    let startedAt = undefined;
-    let completedAt = undefined;
+    const animeName = media.title.english || media.title.romaji;
     let isCompleted = false; 
 
-    if (episode === 1 && currentProg === 0) startedAt = getTodayFuzzy();
-    if (media.episodes && episode >= media.episodes) {
-      newStatus = 'COMPLETED';
-      completedAt = getTodayFuzzy();
-      isCompleted = true; 
+    // --- NEW: The Early Cleanup Fix ---
+    // If the user already watched this episode, skip the AniList API call,
+    // but STILL clean up Supabase and show the success checkmark!
+    if (currentProg < episode) {
+      let newStatus = 'CURRENT';
+      let startedAt = undefined;
+      let completedAt = undefined;
+      
+      if (episode === 1 && currentProg === 0) startedAt = getTodayFuzzy();
+      if (media.episodes && episode >= media.episodes) {
+        newStatus = 'COMPLETED';
+        completedAt = getTodayFuzzy();
+        isCompleted = true; 
+      }
+
+      const mutation = `
+        mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
+          SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id }
+        }
+      `;
+
+      const variables = { mediaId: media.id, progress: episode, status: newStatus };
+      if (startedAt) variables.startedAt = startedAt;
+      if (completedAt) variables.completedAt = completedAt;
+
+      await apiRequest(mutation, variables, token);
+    } else if (media.episodes && currentProg >= media.episodes) {
+      // Catch edge case: Ensure modal shows if they re-watch a finished series finale
+      isCompleted = true;
     }
 
-    const mutation = `
-      mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
-        SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id }
-      }
-    `;
-
-    const variables = { mediaId: media.id, progress: episode, status: newStatus };
-    if (startedAt) variables.startedAt = startedAt;
-    if (completedAt) variables.completedAt = completedAt;
-
-    await apiRequest(mutation, variables, token);
-
-    // FIXED: Remove the tab from RAM so closing it doesn't resurrect the DB row
+    // --- GUARANTEED CLEANUP & UI UPDATE ---
     delete activeSessions[tabId];
 
     const userStorage = await chrome.storage.local.get(['anilistUserId']);
@@ -271,8 +325,6 @@ async function processAutoUpdate(tabTitle, tabId) {
 
     chrome.action.setBadgeBackgroundColor({ color: '#4cca51' }); 
     chrome.action.setBadgeText({ text: '✓' });
-
-    const animeName = media.title.english || media.title.romaji;
     
     if (isCompleted) {
       chrome.tabs.sendMessage(tabId, {
@@ -289,6 +341,8 @@ async function processAutoUpdate(tabTitle, tabId) {
 
   } catch (error) {
     console.error("Auto-Update Process Failed:", error);
+    chrome.action.setBadgeBackgroundColor({ color: '#e74c3c' });
+    chrome.action.setBadgeText({ text: 'ERR' });
   }
 }
 
