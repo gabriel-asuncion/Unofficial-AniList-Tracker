@@ -11,6 +11,22 @@ body {
   position: relative;
 }
 
+/* --- MINIMALIST SCROLLBAR --- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b3a4a;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3db4f2;
+}
+
 h1, h2, h3, h4 { margin: 0 0 10px 0; color: #ffffff; }
 
 button {
@@ -209,4 +225,114 @@ select, input {
 .achieve-prog-text { 
   position: absolute; top: 0; left: 0; width: 100%; text-align: center; 
   font-size: 9px; line-height: 12px; color: #fff; font-weight: bold; 
+}
+
+/* --- NEW: PROFILE DASHBOARD STYLES --- */
+.stats-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px;
+}
+.stat-card {
+  background-color: #151f2e; border-radius: 8px; padding: 12px;
+  display: flex; align-items: center; gap: 12px; border: 1px solid #1a2636;
+}
+.stat-icon {
+  width: 32px; height: 32px; border-radius: 6px; display: flex;
+  align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;
+}
+.stat-info { display: flex; flex-direction: column; }
+.stat-value { color: #fff; font-weight: bold; font-size: 15px; line-height: 1.1; }
+.stat-label { color: #9fadbd; font-size: 11px; }
+
+/* CSS-Only Donut Chart */
+.chart-card {
+  background-color: #151f2e; border-radius: 8px; padding: 15px;
+  border: 1px solid #1a2636; margin-bottom: 15px; text-align: left;
+}
+.chart-header { display: flex; align-items: center; gap: 8px; color: #fff; font-weight: bold; font-size: 13px; margin-bottom: 15px; }
+.donut-container { display: flex; justify-content: center; margin-bottom: 15px; }
+.donut {
+  width: 120px; height: 120px; border-radius: 50%;
+  background: conic-gradient(#3db4f2 0% 100%); /* Replaced dynamically */
+  display: flex; align-items: center; justify-content: center;
+}
+.donut-inner {
+  width: 80px; height: 80px; background-color: #151f2e; border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.donut-total { color: #fff; font-weight: bold; font-size: 18px; line-height: 1; }
+.donut-label { color: #9fadbd; font-size: 10px; }
+
+/* Status Legend */
+.status-legend { display: flex; flex-direction: column; gap: 6px; }
+.legend-item { display: flex; justify-content: space-between; font-size: 12px; color: #fff; align-items: center;}
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; display: inline-block; }
+
+/* Preferences & Formats (Bars) */
+.pref-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.pref-card {
+  background-color: #0b1119; border: 1px solid #1a2636; border-radius: 6px; padding: 10px;
+}
+.pref-name { color: #fff; font-weight: bold; font-size: 12px; margin-bottom: 4px; }
+.pref-count { color: #fff; font-weight: bold; font-size: 14px; margin-bottom: 6px; }
+.pref-bar-bg { width: 100%; height: 4px; background-color: #1a2636; border-radius: 2px; }
+.pref-bar-fill { height: 100%; background-color: #fff; border-radius: 2px; }
+
+.format-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px;}
+.format-item { display: flex; flex-direction: column; gap: 4px; }
+.format-header { display: flex; justify-content: space-between; font-size: 12px; color: #fff; font-weight: bold; }
+
+/* --- PREFERENCES TABS --- */
+.pref-header-top { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.pref-tabs-container {
+  display: flex; background-color: #0b1119; border: 1px solid #1a2636;
+  border-radius: 6px; padding: 2px; margin-bottom: 10px;
+}
+.pref-tab {
+  flex: 1; text-align: center; padding: 6px 0; font-size: 11px;
+  color: #9fadbd; cursor: pointer; border-radius: 4px; transition: 0.2s ease;
+}
+.pref-tab:hover { color: #fff; }
+.pref-tab.active { background-color: #2b3a4a; color: #fff; font-weight: bold; }
+
+/* --- RECOMMENDATION VIEW STYLES --- */
+#recommendation-view {
+  display: flex; flex-direction: column; height: 100%;
+}
+.rec-card {
+  background-color: #151f2e; border-radius: 12px; border: 1px solid #1a2636;
+  display: flex; flex-direction: column; overflow: hidden; flex-grow: 1;
+  margin-bottom: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+}
+.rec-cover-container {
+  width: 100%; height: 200px; position: relative; overflow: hidden; flex-shrink: 0;
+}
+.rec-cover {
+  width: 100%; height: 100%; object-fit: cover; object-position: center 20%;
+}
+.rec-cover-fade {
+  position: absolute; bottom: 0; left: 0; width: 100%; height: 50%;
+  background: linear-gradient(to top, #151f2e 0%, transparent 100%);
+}
+.rec-info {
+  padding: 15px; display: flex; flex-direction: column; gap: 8px; flex-grow: 1; overflow: hidden;
+}
+.rec-title { font-weight: bold; font-size: 16px; color: #fff; line-height: 1.2; }
+.rec-alt-title { font-size: 11px; color: #9fadbd; font-style: italic; margin-bottom: 4px; }
+.rec-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.rec-tag {
+  background-color: #2b3a4a; color: #3db4f2; font-size: 10px; font-weight: bold;
+  padding: 4px 8px; border-radius: 4px;
+}
+.rec-synopsis {
+  font-size: 12px; color: #9fadbd; line-height: 1.5; overflow-y: auto;
+  padding-right: 4px; flex-grow: 1;
+}
+#rec-next-btn {
+  background-color: #3db4f2; color: #fff; border: none; border-radius: 8px;
+  padding: 12px; font-weight: bold; font-size: 14px; cursor: pointer; transition: 0.2s;
+}
+#rec-next-btn:hover { background-color: #2c9ad1; }
+.rec-badge {
+  position: absolute; top: 10px; right: 10px; background: #E5C07B; color: #000;
+  font-size: 10px; font-weight: bold; padding: 4px 8px; border-radius: 12px; z-index: 2;
 }

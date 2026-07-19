@@ -1,5 +1,11 @@
 const CLIENT_ID = ANILIST_CLIENT_ID; // Directly reads the global variable from config.js
 let accessToken = null;
+
+let userTopGenres = [];
+let userExcludedMediaIds = [];
+let recommendationClickCount = 0;
+let recommendationPool = [];
+
 let userId = null;
 let currentSelectedAnime = null; 
 let cachedWatchingList = []; 
@@ -182,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       loadLeaderboard();
       loadAchievementsUI(userId); 
+      loadDetailedStats(userId);
     });
   }
   
@@ -1380,4 +1387,331 @@ async function loadAchievementsUI(userId) {
   } catch (error) {
     container.innerHTML = '<p class="placeholder-text">Failed to load achievements.</p>';
   }
+}
+
+// --- UPDATED: Fetch and Render AniList Lifetime Statistics ---
+async function loadDetailedStats(userId) {
+  // NEW: Added 'tags' to the GraphQL query to fetch Themes (Isekai, etc.)
+  const query = `
+    query ($userId: Int) {
+      User(id: $userId) {
+        statistics {
+          anime {
+            count
+            episodesWatched
+            minutesWatched
+            meanScore
+            statuses(sort: COUNT_DESC) { count status }
+            genres(limit: 6, sort: COUNT_DESC) { count genre }
+            tags(limit: 6, sort: COUNT_DESC) { count tag { name } }
+            formats(limit: 5, sort: COUNT_DESC) { count format }
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const res = await apiRequest(query, { userId: userId });
+    const stats = res.data.User.statistics.anime;
+    userTopGenres = stats.genres.slice(0, 5).map(g => g.genre);
+    // 1. Render Summary Grid
+    const mins = stats.minutesWatched;
+    const days = Math.floor(mins / 1440);
+    const hours = Math.floor((mins % 1440) / 60);
+    const watchTimeStr = days > 0 ? `${days}d ${hours}h` : `${hours}h ${mins % 60}m`;
+    
+    document.getElementById('profile-summary-grid').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(255,255,255,0.05); color: #fff;">📺</div>
+        <div class="stat-info">
+          <span class="stat-value">${stats.count.toLocaleString()}</span>
+          <span class="stat-label">Shows</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(61,180,242,0.1); color: #3db4f2;">▶️</div>
+        <div class="stat-info">
+          <span class="stat-value">${stats.episodesWatched.toLocaleString()}</span>
+          <span class="stat-label">Episodes</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(229,192,123,0.1); color: #E5C07B;">🕒</div>
+        <div class="stat-info">
+          <span class="stat-value">${watchTimeStr}</span>
+          <span class="stat-label">Watch Time</span>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(76,202,81,0.1); color: #4cca51;">⭐</div>
+        <div class="stat-info">
+          <span class="stat-value">${stats.meanScore > 0 ? stats.meanScore : '0.0'}</span>
+          <span class="stat-label">Mean Score</span>
+        </div>
+      </div>
+    `;
+
+    // 2. Render Collection Status (Donut Chart)
+    const statusColors = {
+      'CURRENT': '#3db4f2', 'COMPLETED': '#4cca51', 'PAUSED': '#f39c12', 
+      'DROPPED': '#e74c3c', 'PLANNING': '#9fadbd'
+    };
+    const statusNames = {
+      'CURRENT': 'Watching', 'COMPLETED': 'Completed', 'PAUSED': 'On Hold', 'DROPPED': 'Dropped', 'PLANNING': 'Plan to Watch'
+    };
+
+    let conicString = '';
+    let currentDegree = 0;
+    let legendHtml = '';
+    const totalStatusCount = stats.statuses.reduce((sum, s) => sum + s.count, 0);
+
+    stats.statuses.forEach((s) => {
+      const percentage = (s.count / totalStatusCount) * 100;
+      const color = statusColors[s.status] || '#fff';
+      
+      conicString += `${color} ${currentDegree}% ${currentDegree + percentage}%, `;
+      currentDegree += percentage;
+
+      legendHtml += `
+        <div class="legend-item">
+          <div><span class="legend-dot" style="background-color: ${color};"></span>${statusNames[s.status] || s.status}</div>
+          <b>${s.count}</b>
+        </div>
+      `;
+    });
+
+    document.getElementById('profile-collection-card').classList.remove('hidden');
+    document.getElementById('donut-total-count').textContent = totalStatusCount;
+    document.getElementById('status-donut').style.background = `conic-gradient(${conicString.slice(0, -2)})`;
+    document.getElementById('status-legend-list').innerHTML = legendHtml;
+
+    // 3. Render Preferences Grid & Tab Logic
+    if (stats.genres.length > 0 || stats.tags.length > 0) {
+      document.getElementById('profile-genres-card').classList.remove('hidden');
+      
+      const genresData = stats.genres || [];
+      const themesData = stats.tags || [];
+
+      // Helper function to draw the grid based on the active tab
+      const renderPrefGrid = (data, isTheme) => {
+        if (!data || data.length === 0) {
+          document.getElementById('genres-grid').innerHTML = '<p class="placeholder-text">No data available.</p>';
+          return;
+        }
+        
+        const maxCount = data[0].count; // Used for progress bar width
+        let html = '';
+        
+        data.forEach(item => {
+          const pct = (item.count / maxCount) * 100;
+          const labelName = isTheme ? item.tag.name : item.genre; // AniList nests the tag name
+          
+          html += `
+            <div class="pref-card">
+              <div class="pref-name">${labelName}</div>
+              <div class="pref-count">${item.count}</div>
+              <div class="pref-bar-bg"><div class="pref-bar-fill" style="width: ${pct}%;"></div></div>
+            </div>
+          `;
+        });
+        document.getElementById('genres-grid').innerHTML = html;
+      };
+
+      // Draw Genres by default on load
+      renderPrefGrid(genresData, false);
+
+      // Handle Tab Clicks
+      const genreTab = document.getElementById('tab-genres');
+      const themeTab = document.getElementById('tab-themes');
+
+      genreTab.addEventListener('click', () => {
+        genreTab.classList.add('active');
+        themeTab.classList.remove('active');
+        renderPrefGrid(genresData, false);
+      });
+
+      themeTab.addEventListener('click', () => {
+        themeTab.classList.add('active');
+        genreTab.classList.remove('active');
+        renderPrefGrid(themesData, true);
+      });
+    }
+
+    // 4. Render Formats List
+    if (stats.formats.length > 0) {
+      document.getElementById('profile-formats-card').classList.remove('hidden');
+      const maxFormat = stats.formats[0].count;
+      let formatHtml = '';
+
+      stats.formats.forEach(f => {
+        const pct = (f.count / maxFormat) * 100;
+        formatHtml += `
+          <div class="format-item">
+            <div class="format-header"><span>${f.format}</span><span>${f.count}</span></div>
+            <div class="pref-bar-bg"><div class="pref-bar-fill" style="width: ${pct}%; background-color: #3db4f2;"></div></div>
+          </div>
+        `;
+      });
+      document.getElementById('formats-list').innerHTML = formatHtml;
+    }
+
+  } catch (error) {
+    console.error("Failed to load AniList stats:", error);
+    document.getElementById('profile-summary-grid').innerHTML = '<p class="placeholder-text">Failed to load statistics.</p>';
+  }
+}
+
+// --- NEW: ANIME DISCOVERY ENGINE ---
+
+// 1. Navigation Event Listeners
+document.getElementById('open-discover-btn')?.addEventListener('click', async () => {
+  document.getElementById('profile-view').classList.add('hidden');
+  document.getElementById('recommendation-view').classList.remove('hidden');
+  document.getElementById('rec-content').classList.add('hidden');
+  document.getElementById('rec-loading').classList.remove('hidden');
+  
+  // If we haven't fetched the user's blocklist yet, do it now!
+  if (userExcludedMediaIds.length === 0) {
+    await fetchUserBlacklist();
+  }
+  
+  loadNextRecommendation(0); // Pass 0 to reset the safety attempt counter
+});
+
+document.getElementById('rec-back-btn')?.addEventListener('click', () => {
+  document.getElementById('recommendation-view').classList.add('hidden');
+  document.getElementById('profile-view').classList.remove('hidden');
+});
+
+document.getElementById('rec-next-btn')?.addEventListener('click', () => {
+  recommendationClickCount++;
+  loadNextRecommendation(0); // Pass 0 to reset the safety attempt counter
+});
+
+// 2. Fetch the user's ENTIRE anime list so we don't recommend things they know
+async function fetchUserBlacklist() {
+  const query = `
+    query ($userId: Int) {
+      MediaListCollection(userId: $userId, type: ANIME) {
+        lists { entries { mediaId } }
+      }
+    }
+  `;
+  try {
+    const res = await apiRequest(query, { userId: userId });
+    let ids = new Set();
+    res.data.MediaListCollection.lists.forEach(list => {
+      list.entries.forEach(entry => ids.add(entry.mediaId));
+    });
+    userExcludedMediaIds = Array.from(ids);
+  } catch (e) { console.error("Failed to fetch blacklist"); }
+}
+
+// 3. The Core Recommendation Logic
+async function loadNextRecommendation(attempt = 0) {
+  document.getElementById('rec-content').classList.add('hidden');
+  document.getElementById('rec-loading').classList.remove('hidden');
+  
+  const loadingText = document.getElementById('rec-loading');
+
+  // Check if we need to fetch a new batch of anime
+  if (recommendationPool.length === 0) {
+    
+    // SAFETY NET: Prevent infinite loops for power users who have watched everything
+    if (attempt > 5) {
+      loadingText.innerHTML = "You've watched so much anime, we couldn't find a quick match!<br><br>Click Next to dive deeper.";
+      return; 
+    }
+
+    const isWildcard = (recommendationClickCount + 1) % 3 === 0;
+    
+    // Increase depth to 20 pages (Top 400 anime) so veterans get results!
+    const randomPage = Math.floor(Math.random() * 20) + 1;
+    
+    let variables = { page: randomPage };
+    let filterString = "";
+    let queryArgs = "$page: Int"; // Dynamically build to prevent GraphQL syntax errors
+
+    if (isWildcard && userTopGenres.length > 0) {
+      filterString = ", genre_not_in: $genres";
+      variables.genres = userTopGenres;
+      queryArgs += ", $genres: [String]";
+      document.getElementById('rec-wildcard-badge').classList.remove('hidden');
+    } else if (userTopGenres.length > 0) {
+      filterString = ", genre_in: $genres";
+      variables.genres = userTopGenres;
+      queryArgs += ", $genres: [String]";
+      document.getElementById('rec-wildcard-badge').classList.add('hidden');
+    } else {
+      document.getElementById('rec-wildcard-badge').classList.add('hidden');
+    }
+
+    const query = `
+      query (${queryArgs}) {
+        Page(page: $page, perPage: 20) {
+          media(type: ANIME, sort: POPULARITY_DESC, isAdult: false ${filterString}) {
+            id
+            title { romaji english native }
+            coverImage { extraLarge }
+            description
+            genres
+          }
+        }
+      }
+    `;
+
+    try {
+      loadingText.textContent = `Searching page ${randomPage} archives...`;
+      
+      const res = await apiRequest(query, variables);
+      
+      // Catch GraphQL errors properly
+      if (res.errors) throw new Error(res.errors[0].message);
+      
+      const fetchedAnime = res.data.Page.media;
+      
+      // Filter out anything the user has already watched or planned!
+      recommendationPool = fetchedAnime.filter(anime => !userExcludedMediaIds.includes(anime.id));
+      
+      // If filtering emptied the pool, try again recursively with a higher attempt counter
+      if (recommendationPool.length === 0) {
+        return loadNextRecommendation(attempt + 1);
+      }
+    } catch (e) {
+      console.error("Discovery Engine Error:", e);
+      loadingText.textContent = "Failed to fetch recommendations.";
+      return;
+    }
+  }
+
+  // 4. Render the UI
+  const anime = recommendationPool.pop();
+  
+  // Add to local blacklist so we don't show it again in this session
+  userExcludedMediaIds.push(anime.id); 
+
+  document.getElementById('rec-cover').src = anime.coverImage.extraLarge;
+  document.getElementById('rec-title').textContent = anime.title.english || anime.title.romaji;
+  
+  const altTitle = anime.title.english ? anime.title.romaji : (anime.title.native || '');
+  document.getElementById('rec-alt-title').textContent = altTitle;
+
+  const cleanDesc = anime.description ? anime.description.replace(/<br><br>/g, '\n').replace(/<[^>]*>?/gm, '') : 'No synopsis available.';
+  document.getElementById('rec-synopsis').textContent = cleanDesc;
+
+  const tagsContainer = document.getElementById('rec-tags');
+  tagsContainer.innerHTML = '';
+  anime.genres.slice(0, 4).forEach(genre => {
+    const tag = document.createElement('div');
+    tag.className = 'rec-tag';
+    tag.textContent = genre;
+    tagsContainer.appendChild(tag);
+  });
+
+  loadingText.classList.add('hidden');
+  document.getElementById('rec-content').classList.remove('hidden');
+  
+  // Reset the loading text for the next time it's needed
+  loadingText.textContent = "Finding the perfect anime...";
 }

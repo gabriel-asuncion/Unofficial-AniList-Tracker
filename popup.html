@@ -102,9 +102,10 @@
       <button id="logout-btn" class="secondary-btn" style="width: 100%; margin-top: 20px; border-color: #e06c75; color: #e06c75;">Log Out of AniList</button>
     </div>
 
-    <!-- UPDATED: PROFILE VIEW (Now with Achievements) -->
+    <!-- UPDATED: PROFILE VIEW (Now with Detailed Stats) -->
     <div id="profile-view" class="hidden">
       <button id="profile-back-btn" class="secondary-btn" style="margin-bottom: 15px;">← Back</button>
+      
       <div style="text-align: center; margin-bottom: 15px;">
         <h3 style="color: #3db4f2; margin-bottom: 5px;">Your Profile</h3>
         <p style="font-size: 13px; color: #9fadbd; margin: 0;">Time Saved Skipping: <b id="time-saved-display" style="color: #fff;">0m</b></p>
@@ -115,13 +116,53 @@
             <div id="xp-hover-text">0 / 0 mins</div>
           </div>
         </div>
-        <button id="sync-history-btn" class="secondary-btn" style="width: 100%; font-size: 12px; margin-bottom: 5px;">🔄 Sync Past AniList History</button>
+        <button id="sync-history-btn" class="secondary-btn" style="width: 100%; font-size: 12px; margin-bottom: 15px;">🔄 Sync Past AniList History</button>
+        <button id="open-discover-btn" style="width: 100%; font-size: 13px; margin-bottom: 15px; background-color: #2b3a4a; color: #fff; border: 1px solid #3db4f2; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold;">✨ Discover New Anime</button>
+      </div>
+
+      <!-- 1. The 4-Grid Summary -->
+      <div class="stats-grid" id="profile-summary-grid">
+        <p class="placeholder-text" style="grid-column: span 2;">Loading stats...</p>
+      </div>
+
+      <!-- 2. Collection Status Donut -->
+      <div class="chart-card hidden" id="profile-collection-card">
+        <div class="chart-header">🕓 Collection Status</div>
+        <div class="donut-container">
+          <div class="donut" id="status-donut">
+            <div class="donut-inner">
+              <span class="donut-total" id="donut-total-count">0</span>
+              <span class="donut-label">Total</span>
+            </div>
+          </div>
+        </div>
+        <div class="status-legend" id="status-legend-list"></div>
+      </div>
+
+      <!-- 3. Preferences (Genres & Themes) -->
+      <div class="chart-card hidden" id="profile-genres-card">
+        <div class="pref-header-top">
+          <div style="color: #fff; font-weight: bold; font-size: 14px;">🎛️ Preferences</div>
+          <div style="color: #9fadbd; font-size: 11px;">Most watched categories</div>
+        </div>
+        
+        <div class="pref-tabs-container">
+          <div class="pref-tab active" id="tab-genres">Genres</div>
+          <div class="pref-tab" id="tab-themes">Themes</div>
+        </div>
+
+        <div class="pref-grid" id="genres-grid"></div>
+      </div>
+
+      <!-- 4. Shows by Type -->
+      <div class="chart-card hidden" id="profile-formats-card">
+        <div class="chart-header">🎞️ Shows by Type</div>
+        <div class="format-list" id="formats-list"></div>
       </div>
       
-      <h4 style="margin-bottom: 10px; border-bottom: 1px solid #2b3a4a; padding-bottom: 5px;">Local Achievements</h4>
-      <div id="achievements-container" style="display: grid; grid-template-columns: 1fr; gap: 8px; max-height: 200px; overflow-y: auto;">
+      <h4 style="margin: 20px 0 10px 0; border-bottom: 1px solid #2b3a4a; padding-bottom: 5px;">🏆 Local Achievements</h4>
+      <div id="achievements-container" style="display: grid; grid-template-columns: 1fr; gap: 8px;">
         <p class="placeholder-text">Play some episodes to unlock achievements!</p>
-        <!-- Achievements will render here -->
       </div>
     </div>
 
@@ -173,6 +214,37 @@
       <button id="save-btn" class="primary-btn">Save Update</button>
     </div>
   </div>
+  <!-- NEW: RECOMMENDATION VIEW -->
+    <div id="recommendation-view" class="hidden">
+      <button id="rec-back-btn" class="secondary-btn" style="margin-bottom: 12px;">← Back to Profile</button>
+      
+      <!-- Added flex-grow: 1 so it takes up empty space -->
+      <div id="rec-loading" style="text-align: center; color: #9fadbd; margin-top: 50px; flex-grow: 1;">
+        Finding the perfect anime...
+      </div>
+
+      <!-- Adjusted to flex-grow instead of height:100% -->
+      <div id="rec-content" class="hidden" style="display: flex; flex-direction: column; flex-grow: 1;">
+        <div class="rec-card">
+          <div class="rec-cover-container">
+            <div id="rec-wildcard-badge" class="rec-badge hidden">Wildcard Pick!</div>
+            <img id="rec-cover" class="rec-cover" src="">
+            <div class="rec-cover-fade"></div>
+          </div>
+          <div class="rec-info">
+            <div>
+              <div id="rec-title" class="rec-title">Anime Title</div>
+              <div id="rec-alt-title" class="rec-alt-title">Alt Title</div>
+            </div>
+            <div id="rec-tags" class="rec-tags"></div>
+            <div id="rec-synopsis" class="rec-synopsis">Synopsis goes here...</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- FIX: The Next Button is now outside of rec-content! -->
+      <button id="rec-next-btn" style="margin-top: 12px; width: 100%;">Skip / Next Recommendation ⏭️</button>
+    </div>
 
   <div id="fullscreen-modal" class="hidden">
     <img id="modal-img" src="" alt="Fullscreen Cover">
