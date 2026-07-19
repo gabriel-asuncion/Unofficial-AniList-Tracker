@@ -14,6 +14,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   if (!isWhitelisted) return; 
 
   // --- TRACKING VARIABLES ---
+  let activeWatchSeconds = 0;
   let hasTriggeredUpdate = false;
   let trackedVideo = null;
   let currentVideoSrc = ""; 
@@ -47,6 +48,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     // 1. SPA Navigation Detector (URL changes)
     if (location.href !== currentUrl) {
       console.log("[AniList Quick Update] URL changed! Resetting tracker for new episode.");
+      activeWatchSeconds = 0;
       currentUrl = location.href;
       trackedVideo = null;        
       currentVideoSrc = "";       
@@ -64,6 +66,12 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       hasTriggeredUpdate = false;
       otgLoaded = false;
       resolvedOtgData = null;
+    }
+
+    // --- NEW: Anti-Cheat XP Tracker ---
+    // Only count seconds if the video is playing AND the user is actually looking at the tab
+    if (trackedVideo && !trackedVideo.paused && document.visibilityState === 'visible') {
+      activeWatchSeconds++;
     }
 
     // 3. Find the video if we don't have one
@@ -146,11 +154,14 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       }
 
       if ((trackedVideo.currentTime / trackedVideo.duration) * 100 >= userThreshold && !hasTriggeredUpdate) {
-        hasTriggeredUpdate = true;
-        try {
-          chrome.runtime.sendMessage({ action: "AUTO_UPDATE_ANIME" }).catch(() => {});
-        } catch(e) {}
-      }
+      hasTriggeredUpdate = true;
+      try {
+        chrome.runtime.sendMessage({ 
+          action: "AUTO_UPDATE_ANIME",
+          trueWatchSeconds: activeWatchSeconds // NEW: Send the verified watch time to Supabase!
+        }).catch(() => {});
+      } catch(e) {}
+    }
     }
   }, 1000); 
 

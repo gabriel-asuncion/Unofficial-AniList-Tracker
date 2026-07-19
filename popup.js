@@ -61,7 +61,21 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('current-view-label').textContent = e.target.textContent + ' ▾';
       document.getElementById('filter-dropdown').classList.add('hidden');
       document.getElementById('search-input').value = ''; 
-      if (accessToken) loadAnimeList();
+      
+      // View Replacement Logic
+      if (currentFilter === 'LEADERBOARD') {
+        document.getElementById('main-view').classList.add('hidden');
+        document.getElementById('search-input').classList.add('hidden');
+        document.getElementById('profile-view').classList.add('hidden');
+        document.getElementById('leaderboard-view').classList.remove('hidden');
+        loadLeaderboard();
+        loadAchievementsUI(userId);
+      } else if (accessToken) {
+        document.getElementById('leaderboard-view').classList.add('hidden');
+        document.getElementById('profile-view').classList.add('hidden');
+        document.getElementById('main-view').classList.remove('hidden');
+        loadAnimeList();
+      }
     });
   });
 
@@ -98,15 +112,85 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- SKIP INTRO BUTTON ---
+  // --- SKIP INTRO BUTTON & TIME WIZARD (ANTI-SPAM) ---
   const skipBtn = document.getElementById('skip-intro-btn');
   if (skipBtn) {
     skipBtn.addEventListener('click', () => {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
+          // 1. Always physically skip the video for the user
           chrome.tabs.sendMessage(tabs[0].id, { action: "SKIP_TIME", amount: 90 });
+          
+          // 2. Anti-Spam Logic: Check the last time they earned the stat
+          chrome.storage.local.get(['timeSavedSeconds', 'lastSkipTimestamp'], (res) => {
+            const now = Date.now();
+            const lastSkip = res.lastSkipTimestamp || 0;
+            
+            // 60-second cooldown (60000 milliseconds)
+            if (now - lastSkip < 60000) {
+              console.log("[Anti-Spam] Skip registered, but on cooldown for stats.");
+              
+              // Optional: Visual feedback that it didn't count for stats
+              const originalText = skipBtn.textContent;
+              skipBtn.textContent = "Cooldown!";
+              skipBtn.style.color = "#e74c3c";
+              setTimeout(() => { 
+                skipBtn.textContent = originalText; 
+                skipBtn.style.color = "#E5C07B";
+              }, 1500);
+              
+              return; // Stop here, don't award stats!
+            }
+
+            // 3. Award the stats if the cooldown has passed
+            const newTotal = (res.timeSavedSeconds || 0) + 90;
+            chrome.storage.local.set({ 
+              timeSavedSeconds: newTotal,
+              lastSkipTimestamp: now // Reset the cooldown timer
+            });
+            
+            console.log(`[Time Wizard] Total time saved: ${newTotal} seconds!`);
+            
+            // Update UI instantly if they are looking at the profile
+            const timeSavedDisplay = document.getElementById('time-saved-display');
+            if (timeSavedDisplay) {
+              timeSavedDisplay.textContent = `${Math.floor(newTotal / 60)}m`;
+            }
+          });
         }
       });
+    });
+  }
+
+  // --- UPDATED: PROFILE VIEW NAVIGATION ---
+  const userAvatar = document.getElementById('user-avatar');
+  if (userAvatar) {
+    userAvatar.addEventListener('click', (e) => {
+      e.stopPropagation(); 
+      document.getElementById('main-view').classList.add('hidden');
+      document.getElementById('search-input').classList.add('hidden');
+      document.getElementById('filter-dropdown').classList.add('hidden');
+      document.getElementById('leaderboard-view').classList.add('hidden');
+      document.getElementById('profile-view').classList.remove('hidden');
+      
+      // Only check time saved locally, remove the hasSyncedHistory check!
+      chrome.storage.local.get(['timeSavedSeconds'], (res) => {
+        const totalSecs = res.timeSavedSeconds || 0;
+        const mins = Math.floor(totalSecs / 60);
+        document.getElementById('time-saved-display').textContent = `${mins}m`;
+      });
+
+      loadLeaderboard();
+      loadAchievementsUI(userId); 
+    });
+  }
+  
+
+  const profileBackBtn = document.getElementById('profile-back-btn');
+  if (profileBackBtn) {
+    profileBackBtn.addEventListener('click', () => {
+      document.getElementById('profile-view').classList.add('hidden');
+      loadAnimeList(); 
     });
   }
 
@@ -332,6 +416,16 @@ async function initializeApp() {
     
     document.getElementById('user-avatar').src = viewer.avatar.medium;
     document.getElementById('user-name').textContent = viewer.name;
+
+    // Cache profile for background sync
+    chrome.storage.local.set({ 
+      anilistUserId: userId,
+      anilistUsername: viewer.name,
+      anilistAvatar: viewer.avatar.medium
+    });
+
+    // Load initial level tag next to name
+    loadUserLevel(userId);
 
     const foundAnimeOnTab = await checkCurrentTabForAnime();
     if (!foundAnimeOnTab) {
@@ -1080,5 +1174,210 @@ async function saveAnimeUpdate() {
   } catch (error) {
     saveBtn.textContent = 'Error! Try again';
     saveBtn.disabled = false;
+  }
+}
+
+// --- UPDATED: Fetch User Level & Render Progress Bar ---
+async function loadUserLevel(userId) {
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/user_stats?anilist_user_id=eq.${userId}&select=level,true_watch_seconds`;
+    const res = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
+    const data = await res.json();
+    
+    if (data && data.length > 0) {
+      const { level, true_watch_seconds } = data[0];
+      const currentMinutes = Math.floor(true_watch_seconds / 60);
+      
+      // Update Name Badge
+      const userLevelEl = document.getElementById('user-level');
+      if (userLevelEl) userLevelEl.textContent = `Lv. ${level}`;
+      
+      // Calculate XP thresholds for the progress bar
+      const currentLevelBaseMins = 500000 * Math.pow((level - 1) / 99, 2);
+      const nextLevelMins = 500000 * Math.pow(level / 99, 2);
+      
+      let pct = 100;
+      let hoverText = "MAX LEVEL";
+      
+      if (level < 100) {
+        const minsIntoLevel = currentMinutes - currentLevelBaseMins;
+        const minsRequiredForNext = nextLevelMins - currentLevelBaseMins;
+        pct = Math.min(100, Math.max(0, (minsIntoLevel / minsRequiredForNext) * 100));
+        hoverText = `${Math.floor(currentMinutes).toLocaleString()} / ${Math.floor(nextLevelMins).toLocaleString()} mins`;
+      }
+
+      document.getElementById('xp-progress-bar').style.width = `${pct}%`;
+      document.getElementById('xp-hover-text').textContent = hoverText;
+    }
+  } catch (e) { console.error("Failed to load XP", e); }
+}
+
+// --- UPDATED: Handle Retroactive Sync Click (Cloud State) ---
+  const syncHistoryBtn = document.getElementById('sync-history-btn');
+  if (syncHistoryBtn) {
+    syncHistoryBtn.addEventListener('click', (e) => {
+      const btn = e.target;
+      btn.textContent = "Syncing with AniList...";
+      btn.disabled = true;
+      
+      chrome.runtime.sendMessage({ action: "SYNC_PAST_HISTORY" }, (response) => {
+        if (response && response.success) {
+          btn.textContent = `Added ${Math.floor(response.minutes).toLocaleString()} mins!`;
+          btn.style.color = "#4cca51";
+          
+          // Removed the local storage set here. Background.js handles it in the cloud now!
+          
+          setTimeout(() => {
+            loadUserLevel(userId); 
+            btn.classList.add('hidden'); // Hide the button immediately after success
+          }, 2000);
+        } else {
+          btn.textContent = "Sync Failed.";
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+// --- NEW: Fetch Global Leaderboard ---
+async function loadLeaderboard() {
+  const container = document.getElementById('leaderboard-container');
+  container.innerHTML = '<p class="placeholder-text">Syncing with global database...</p>';
+  
+  try {
+    // Fetch top 10 users ordered by true watch time
+    const url = `${SUPABASE_URL}/rest/v1/user_stats?order=true_watch_seconds.desc&limit=10`;
+    const res = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
+    const topUsers = await res.json();
+    
+    container.innerHTML = '';
+    
+    if (!topUsers || topUsers.length === 0) {
+      container.innerHTML = '<p class="placeholder-text">No data yet. Be the first to level up!</p>';
+      return;
+    }
+
+    topUsers.forEach((user, index) => {
+      const isMe = user.anilist_user_id === userId;
+      const row = document.createElement('div');
+      
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.padding = '8px 5px';
+      row.style.borderBottom = '1px solid #1a2636';
+      row.style.backgroundColor = isMe ? 'rgba(61, 180, 242, 0.1)' : 'transparent';
+      
+      const rankColor = index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : '#9fadbd';
+
+      row.innerHTML = `
+        <div style="width: 20px; font-weight: bold; color: ${rankColor}; font-size: 14px;">#${index + 1}</div>
+        <img src="${user.avatar_url || ''}" style="width: 24px; height: 24px; border-radius: 50%; margin: 0 10px; object-fit: cover;">
+        <div style="flex-grow: 1; font-size: 13px; color: ${isMe ? '#3db4f2' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">
+          ${user.username}
+        </div>
+        <div style="font-size: 12px; font-weight: bold; color: #E5C07B; background: rgba(229, 192, 123, 0.1); padding: 2px 6px; border-radius: 4px;">
+          Lv. ${user.level}
+        </div>
+      `;
+      container.appendChild(row);
+    });
+  } catch (error) {
+     container.innerHTML = '<p class="placeholder-text" style="color: #e74c3c;">Failed to load leaderboard.</p>';
+  }
+}
+
+// --- NEW: Render Achievements UI ---
+async function loadAchievementsUI(userId) {
+  const container = document.getElementById('achievements-container');
+  if (!container) return;
+  container.innerHTML = '<p class="placeholder-text">Loading achievements...</p>';
+
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/user_stats?anilist_user_id=eq.${userId}&select=unlocked_achievements,tracking_data,true_watch_seconds`;
+    const res = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
+    const data = await res.json();
+
+    if (!data || data.length === 0) return;
+
+    const unlockedIds = data[0].unlocked_achievements || [];
+    const trackingData = data[0].tracking_data || {};
+    const trueWatchSeconds = data[0].true_watch_seconds || 0;
+
+    // --- NEW: Hide the Sync Button based on Cloud Data! ---
+    const syncBtn = document.getElementById('sync-history-btn');
+    if (trackingData.has_synced_history && syncBtn) {
+      syncBtn.classList.add('hidden');
+    } else if (syncBtn) {
+      syncBtn.classList.remove('hidden');
+    }
+
+    // Bundle stats to calculate progress bars accurately
+    const currentStats = {
+      totalEpisodesTracked: trackingData.total_episodes_tracked || 0,
+      episodesToday: trackingData.episodes_today || 0,
+      streak: trackingData.streak || 0,
+      timeSavedSeconds: trackingData.total_time_saved || 0,
+      trueWatchSeconds: trueWatchSeconds,
+      level: Math.floor(1 + 99 * Math.sqrt((trueWatchSeconds / 60) / 500000)),
+      completedSeries: trackingData.completed_series || 0,
+      ratingsSubmitted: trackingData.ratings_submitted || 0
+    };
+
+    // Split achievements into Unlocked and Locked arrays
+    const unlockedList = ACHIEVEMENTS.filter(a => unlockedIds.includes(a.id)).reverse(); // Show newest first
+    const lockedList = ACHIEVEMENTS.filter(a => !unlockedIds.includes(a.id));
+    const allSorted = [...unlockedList, ...lockedList];
+
+    let html = '';
+
+    allSorted.forEach((achieve, index) => {
+      const isUnlocked = index < unlockedList.length;
+      let progressHtml = '';
+      
+      // If locked and supports progress tracking, draw the bar!
+      if (!isUnlocked && achieve.progress) {
+        const [current, max] = achieve.progress(currentStats);
+        const displayCurrent = Math.floor(current);
+        const pct = Math.min(100, Math.max(0, (displayCurrent / max) * 100));
+        progressHtml = `
+          <div class="achieve-prog-track">
+            <div class="achieve-prog-fill" style="width: ${pct}%"></div>
+            <div class="achieve-prog-text">${displayCurrent.toLocaleString()} / ${max.toLocaleString()}</div>
+          </div>
+        `;
+      }
+
+      // Hide anything beyond the first 3 items
+      const hiddenClass = index >= 3 ? 'hidden-achievement hidden' : '';
+      
+      html += `
+        <div class="achieve-card ${isUnlocked ? 'unlocked' : 'locked'} ${hiddenClass}">
+          <div class="achieve-icon">${achieve.icon}</div>
+          <div class="achieve-info">
+            <div class="achieve-title">${achieve.name}</div>
+            <div class="achieve-desc">${achieve.description}</div>
+            ${progressHtml}
+          </div>
+        </div>
+      `;
+    });
+
+    if (allSorted.length > 3) {
+      html += `<button id="view-more-achievements" class="secondary-btn" style="width: 100%; margin-top: 8px;">View All Achievements</button>`;
+    }
+
+    container.innerHTML = html;
+
+    // View More Button Logic
+    const viewMoreBtn = document.getElementById('view-more-achievements');
+    if (viewMoreBtn) {
+      viewMoreBtn.addEventListener('click', () => {
+        document.querySelectorAll('.hidden-achievement').forEach(el => el.classList.remove('hidden'));
+        viewMoreBtn.remove();
+      });
+    }
+
+  } catch (error) {
+    container.innerHTML = '<p class="placeholder-text">Failed to load achievements.</p>';
   }
 }

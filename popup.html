@@ -21,7 +21,10 @@
       <div id="user-profile">
         <img id="user-avatar" src="" alt="Avatar">
         <div class="profile-text">
-          <h2 id="user-name">User</h2>
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <h2 id="user-name">User</h2>
+            <span id="user-level" style="background: #E5C07B; color: #0b1119; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 10px;">Lv. 1</span>
+          </div>
           <div id="current-view-label">Schedule (My List) ▾</div>
         </div>
       </div>
@@ -37,6 +40,8 @@
       <div class="filter-option" data-value="CURRENT">Watching</div>
       <div class="filter-option" data-value="PLANNING">Planning</div>
       <div class="filter-option" data-value="UPCOMING">Upcoming (Next Season)</div>
+      <!-- NEW: Leaderboard Option -->
+      <div class="filter-option" data-value="LEADERBOARD" style="border-top: 1px solid #2b3a4a; color: #E5C07B;">Global Leaderboard</div>
     </div>
 
     <!-- 1. AUTO-DETECT VIEW -->
@@ -97,6 +102,37 @@
       <button id="logout-btn" class="secondary-btn" style="width: 100%; margin-top: 20px; border-color: #e06c75; color: #e06c75;">Log Out of AniList</button>
     </div>
 
+    <!-- UPDATED: PROFILE VIEW (Now with Achievements) -->
+    <div id="profile-view" class="hidden">
+      <button id="profile-back-btn" class="secondary-btn" style="margin-bottom: 15px;">← Back</button>
+      <div style="text-align: center; margin-bottom: 15px;">
+        <h3 style="color: #3db4f2; margin-bottom: 5px;">Your Profile</h3>
+        <p style="font-size: 13px; color: #9fadbd; margin: 0;">Time Saved Skipping: <b id="time-saved-display" style="color: #fff;">0m</b></p>
+        
+        <div id="xp-progress-wrapper">
+          <div id="xp-progress-container" title="Watch more anime to level up!">
+            <div id="xp-progress-bar"></div>
+            <div id="xp-hover-text">0 / 0 mins</div>
+          </div>
+        </div>
+        <button id="sync-history-btn" class="secondary-btn" style="width: 100%; font-size: 12px; margin-bottom: 5px;">🔄 Sync Past AniList History</button>
+      </div>
+      
+      <h4 style="margin-bottom: 10px; border-bottom: 1px solid #2b3a4a; padding-bottom: 5px;">Local Achievements</h4>
+      <div id="achievements-container" style="display: grid; grid-template-columns: 1fr; gap: 8px; max-height: 200px; overflow-y: auto;">
+        <p class="placeholder-text">Play some episodes to unlock achievements!</p>
+        <!-- Achievements will render here -->
+      </div>
+    </div>
+
+    <!-- NEW: SEPARATE LEADERBOARD VIEW -->
+    <div id="leaderboard-view" class="hidden">
+      <h3 style="margin-bottom: 10px; border-bottom: 1px solid #2b3a4a; padding-bottom: 5px; color: #E5C07B;">Global Leaderboard</h3>
+      <div id="leaderboard-container" style="background-color: #0b1119; border: 1px solid #1a2636; border-radius: 6px; min-height: 150px; max-height: 350px; overflow-y: auto; padding: 10px;">
+        <p class="placeholder-text">Leaderboard syncing...</p>
+      </div>
+    </div>
+
     <!-- 3. MAIN LIST VIEW -->
     <div id="main-view">
       <input type="text" id="search-input" placeholder="Search anime list..." class="hidden">
@@ -143,8 +179,9 @@
     <div class="modal-close-text">Click anywhere to close</div>
   </div>
 
-  <!-- NEW: Load the environment variables first -->
+  <!-- Modify the bottom script tags to look like this: -->
   <script src="config.js"></script>
+  <script src="achievements.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
