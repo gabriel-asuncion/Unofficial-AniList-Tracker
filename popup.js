@@ -76,6 +76,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('leaderboard-view').classList.remove('hidden');
         loadLeaderboard();
         loadAchievementsUI(userId);
+      } else if (currentFilter === 'UNFINISHED') {
+        // --- NEW: Route for the Unfinished OTG view ---
+        document.getElementById('leaderboard-view').classList.add('hidden');
+        document.getElementById('profile-view').classList.add('hidden');
+        document.getElementById('main-view').classList.remove('hidden');
+        document.getElementById('day-tabs').classList.add('hidden'); // Hide days
+        document.getElementById('search-input').classList.remove('hidden');
+        loadUnfinishedList();
       } else if (accessToken) {
         document.getElementById('leaderboard-view').classList.add('hidden');
         document.getElementById('profile-view').classList.add('hidden');
@@ -429,6 +437,15 @@ async function initializeApp() {
       anilistUserId: userId,
       anilistUsername: viewer.name,
       anilistAvatar: viewer.avatar.medium
+    });
+
+    // Check storage for an equipped badge and display it
+    chrome.storage.local.get(['equippedBadge'], (res) => {
+      if (res.equippedBadge) {
+        const badgeImg = document.getElementById('user-active-badge');
+        badgeImg.src = res.equippedBadge;
+        badgeImg.classList.remove('hidden');
+      }
     });
 
     // Load initial level tag next to name
@@ -1310,7 +1327,6 @@ async function loadAchievementsUI(userId) {
     const trackingData = data[0].tracking_data || {};
     const trueWatchSeconds = data[0].true_watch_seconds || 0;
 
-    // --- NEW: Hide the Sync Button based on Cloud Data! ---
     const syncBtn = document.getElementById('sync-history-btn');
     if (trackingData.has_synced_history && syncBtn) {
       syncBtn.classList.add('hidden');
@@ -1318,7 +1334,6 @@ async function loadAchievementsUI(userId) {
       syncBtn.classList.remove('hidden');
     }
 
-    // Bundle stats to calculate progress bars accurately
     const currentStats = {
       totalEpisodesTracked: trackingData.total_episodes_tracked || 0,
       episodesToday: trackingData.episodes_today || 0,
@@ -1330,59 +1345,99 @@ async function loadAchievementsUI(userId) {
       ratingsSubmitted: trackingData.ratings_submitted || 0
     };
 
-    // Split achievements into Unlocked and Locked arrays
-    const unlockedList = ACHIEVEMENTS.filter(a => unlockedIds.includes(a.id)).reverse(); // Show newest first
+    const unlockedList = ACHIEVEMENTS.filter(a => unlockedIds.includes(a.id)).reverse(); 
     const lockedList = ACHIEVEMENTS.filter(a => !unlockedIds.includes(a.id));
     const allSorted = [...unlockedList, ...lockedList];
 
-    let html = '';
+    // Wrap the rendering in a storage check to get the currently equipped badge
+    chrome.storage.local.get(['equippedBadge'], (storageRes) => {
+      const activeIconPath = storageRes.equippedBadge || null;
+      let html = '';
 
-    allSorted.forEach((achieve, index) => {
-      const isUnlocked = index < unlockedList.length;
-      let progressHtml = '';
-      
-      // If locked and supports progress tracking, draw the bar!
-      if (!isUnlocked && achieve.progress) {
-        const [current, max] = achieve.progress(currentStats);
-        const displayCurrent = Math.floor(current);
-        const pct = Math.min(100, Math.max(0, (displayCurrent / max) * 100));
-        progressHtml = `
-          <div class="achieve-prog-track">
-            <div class="achieve-prog-fill" style="width: ${pct}%"></div>
-            <div class="achieve-prog-text">${displayCurrent.toLocaleString()} / ${max.toLocaleString()}</div>
+      allSorted.forEach((achieve, index) => {
+        const isUnlocked = index < unlockedList.length;
+        let progressHtml = '';
+        
+        if (!isUnlocked && achieve.progress) {
+          const [current, max] = achieve.progress(currentStats);
+          const displayCurrent = Math.floor(current);
+          const pct = Math.min(100, Math.max(0, (displayCurrent / max) * 100));
+          progressHtml = `
+            <div class="achieve-prog-track">
+              <div class="achieve-prog-fill" style="width: ${pct}%"></div>
+              <div class="achieve-prog-text">${displayCurrent.toLocaleString()} / ${max.toLocaleString()}</div>
+            </div>
+          `;
+        }
+
+        const hiddenClass = index >= 3 ? 'hidden-achievement hidden' : '';
+        
+        // --- FIXED: Use getURL for the image ---
+        const imgUrl = chrome.runtime.getURL(achieve.icon);
+        const iconHtml = `<img src="${imgUrl}" alt="${achieve.name}" style="width: 32px; height: 32px; object-fit: contain; flex-shrink: 0;">`;
+        
+        // --- FIXED: Inject the Radio Button Toggle ---
+        let toggleHtml = '';
+        if (isUnlocked) {
+          const isChecked = (activeIconPath === achieve.icon) ? 'checked' : '';
+          toggleHtml = `
+            <input type="radio" name="badge-selector" class="badge-radio" value="${achieve.icon}" ${isChecked} 
+                   style="cursor: pointer; width: 18px; height: 18px; accent-color: #E5C07B;" title="Equip this badge">
+          `;
+        } else {
+          toggleHtml = `<div style="width: 18px; height: 18px; border: 1px dashed #555; border-radius: 3px;" title="Locked"></div>`;
+        }
+        
+        html += `
+          <div class="achieve-card ${isUnlocked ? 'unlocked' : 'locked'} ${hiddenClass}" 
+               style="display: flex; align-items: center; justify-content: space-between; background-color: #151f2e; padding: 10px 12px; border-radius: 8px; border: 1px solid #2b3a4a; margin-bottom: 8px; opacity: ${isUnlocked ? '1' : '0.5'};">
+            
+            <div style="display: flex; gap: 12px; align-items: center; flex-grow: 1;">
+              ${iconHtml}
+              <div class="achieve-info" style="display: flex; flex-direction: column;">
+                <div class="achieve-title" style="color: #fff; font-weight: bold; font-size: 14px;">${achieve.name}</div>
+                <div class="achieve-desc" style="color: #9fadbd; font-size: 12px;">${achieve.description}</div>
+                ${progressHtml}
+              </div>
+            </div>
+            
+            <div style="padding-left: 10px; display: flex; align-items: center; justify-content: center;">
+              ${toggleHtml}
+            </div>
+
           </div>
         `;
+      });
+
+      if (allSorted.length > 3) {
+        html += `<button id="view-more-achievements" class="secondary-btn" style="width: 100%; margin-top: 8px;">View All Achievements</button>`;
       }
 
-      // Hide anything beyond the first 3 items
-      const hiddenClass = index >= 3 ? 'hidden-achievement hidden' : '';
-      
-      html += `
-        <div class="achieve-card ${isUnlocked ? 'unlocked' : 'locked'} ${hiddenClass}">
-          <div class="achieve-icon">${achieve.icon}</div>
-          <div class="achieve-info">
-            <div class="achieve-title">${achieve.name}</div>
-            <div class="achieve-desc">${achieve.description}</div>
-            ${progressHtml}
-          </div>
-        </div>
-      `;
-    });
+      container.innerHTML = html;
 
-    if (allSorted.length > 3) {
-      html += `<button id="view-more-achievements" class="secondary-btn" style="width: 100%; margin-top: 8px;">View All Achievements</button>`;
-    }
-
-    container.innerHTML = html;
-
-    // View More Button Logic
-    const viewMoreBtn = document.getElementById('view-more-achievements');
-    if (viewMoreBtn) {
-      viewMoreBtn.addEventListener('click', () => {
-        document.querySelectorAll('.hidden-achievement').forEach(el => el.classList.remove('hidden'));
-        viewMoreBtn.remove();
+      // --- FIXED: Attach Listeners to the new Radio Buttons ---
+      document.querySelectorAll('.badge-radio').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+          const selectedIcon = e.target.value;
+          chrome.storage.local.set({ equippedBadge: selectedIcon });
+          
+          const headerBadge = document.getElementById('user-active-badge');
+          if (headerBadge) {
+            headerBadge.src = chrome.runtime.getURL(selectedIcon);
+            headerBadge.classList.remove('hidden');
+          }
+        });
       });
-    }
+
+      // View More Button Logic
+      const viewMoreBtn = document.getElementById('view-more-achievements');
+      if (viewMoreBtn) {
+        viewMoreBtn.addEventListener('click', () => {
+          document.querySelectorAll('.hidden-achievement').forEach(el => el.classList.remove('hidden'));
+          viewMoreBtn.remove();
+        });
+      }
+    });
 
   } catch (error) {
     container.innerHTML = '<p class="placeholder-text">Failed to load achievements.</p>';
@@ -1714,4 +1769,160 @@ async function loadNextRecommendation(attempt = 0) {
   
   // Reset the loading text for the next time it's needed
   loadingText.textContent = "Finding the perfect anime...";
+}
+
+// ==========================================
+// 🚧 UNFINISHED (OTG) VIEW LOGIC
+// ==========================================
+
+async function loadUnfinishedList() {
+  const container = document.getElementById('anime-list');
+  renderSkeleton(); // Show loading animation
+
+  try {
+    // 1. Fetch active OTG saves from Supabase
+    const supabaseUrl = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&order=updated_at.desc`;
+    const res = await fetch(supabaseUrl, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    });
+    const otgSaves = await res.json();
+
+    if (!otgSaves || otgSaves.length === 0) {
+      container.innerHTML = '<p class="placeholder-text">You have no unfinished episodes.<br>Great job keeping a clean slate!</p>';
+      return;
+    }
+
+    // 2. Extract unique media IDs and bulk fetch details from AniList
+    const mediaIds = [...new Set(otgSaves.map(save => save.media_id))];
+    
+    const query = `
+      query ($idIn: [Int]) {
+        Page(page: 1, perPage: 50) {
+          media(id_in: $idIn, type: ANIME) {
+            id title { romaji english } coverImage { medium large } episodes
+            mediaListEntry { progress status score }
+          }
+        }
+      }
+    `;
+
+    const aniRes = await apiRequest(query, { idIn: mediaIds });
+    const fetchedMedia = aniRes.data?.Page?.media || [];
+
+    // 3. Merge Supabase saves with AniList metadata
+    const mergedList = otgSaves.map(save => {
+      const mediaMatch = fetchedMedia.find(m => m.id === save.media_id);
+      return {
+        ...save,
+        media: mediaMatch || null
+      };
+    }).filter(item => item.media !== null); // Drop rows if AniList data fails
+
+    renderUnfinishedList(mergedList);
+
+  } catch (error) {
+    console.error("Failed to load Unfinished list:", error);
+    container.innerHTML = '<p class="placeholder-text" style="color: #e74c3c;">Failed to load OTG saves.</p>';
+  }
+}
+
+function renderUnfinishedList(entries) {
+  const container = document.getElementById('anime-list');
+  container.innerHTML = ''; 
+
+  if (entries.length === 0) {
+    container.innerHTML = '<p class="placeholder-text">No unfinished episodes found.</p>';
+    return;
+  }
+
+  entries.forEach(entry => {
+    const media = entry.media;
+    
+    // Format the timestamp (e.g., 105.5s -> 01:45)
+    const mins = Math.floor(entry.playback_time / 60);
+    const secs = Math.floor(entry.playback_time % 60).toString().padStart(2, '0');
+    const timeString = `${mins}:${secs}`;
+
+    const item = document.createElement('div');
+    item.className = 'anime-list-item';
+    item.setAttribute('data-title', `${media.title.romaji.toLowerCase()} ${media.title.english ? media.title.english.toLowerCase() : ''}`);
+
+    item.innerHTML = `
+      <img src="${media.coverImage.medium}" style="width: 40px; height: 55px; object-fit: cover; border-radius: 4px; margin-right: 10px;">
+      <div style="flex-grow: 1;">
+        <div class="anime-title-text" style="font-weight: bold; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;">
+          ${media.title.romaji}
+        </div>
+        <div style="font-size: 12px; color: #E5C07B; margin-top: 2px;">
+          Tracking Episode ${entry.episode}
+        </div>
+        <div style="font-size: 11px; color: #9fadbd; font-weight: bold;">
+          Left off at: ${timeString}
+        </div>
+      </div>
+      <button class="otg-finish-btn" data-media-id="${entry.media_id}" data-ep="${entry.episode}" 
+              style="background: transparent; color: #4cca51; border: 1px solid #4cca51; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s;">
+        ✓ Finish
+      </button>
+    `;
+
+    // Title hover logic
+    const titleEl = item.querySelector('.anime-title-text');
+    titleEl.addEventListener('mouseenter', () => titleEl.textContent = media.title.english || media.title.romaji);
+    titleEl.addEventListener('mouseleave', () => titleEl.textContent = media.title.romaji);
+
+    // Let clicking the item still open the standard detail view so they can edit scores/status
+    item.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'BUTTON') {
+        openDetailView({
+          media: media,
+          progress: media.mediaListEntry?.progress || 0,
+          status: media.mediaListEntry?.status || 'CURRENT',
+          score: media.mediaListEntry?.score || 0
+        });
+      }
+    });
+
+    // Handle Manual Deletion
+    const finishBtn = item.querySelector('.otg-finish-btn');
+    finishBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const mId = e.target.getAttribute('data-media-id');
+      const ep = e.target.getAttribute('data-ep');
+      
+      e.target.textContent = '...';
+      e.target.disabled = true;
+
+      const success = await deleteManualOtgSave(userId, mId, ep);
+      if (success) {
+        item.style.opacity = '0';
+        setTimeout(() => {
+          item.remove();
+          if (container.children.length === 0) {
+            container.innerHTML = '<p class="placeholder-text">All caught up!</p>';
+          }
+        }, 300);
+      } else {
+        e.target.textContent = 'Error';
+        e.target.style.borderColor = '#e74c3c';
+        e.target.style.color = '#e74c3c';
+      }
+    });
+
+    container.appendChild(item);
+  });
+}
+
+async function deleteManualOtgSave(uId, mId, ep) {
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${uId}&media_id=eq.${mId}&episode=eq.${ep}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    });
+    return res.ok;
+  } catch (error) {
+    console.error("Failed to delete manual OTG save:", error);
+    return false;
+  }
 }
