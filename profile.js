@@ -17,7 +17,17 @@ document.addEventListener('DOMContentLoaded', () => {
       chrome.storage.local.get(['timeSavedSeconds'], (res) => {
         const totalSecs = res.timeSavedSeconds || 0;
         const mins = Math.floor(totalSecs / 60);
-        document.getElementById('time-saved-display').textContent = `${mins}m`;
+        
+        const timeSavedEl = document.getElementById('time-saved-display');
+        if (timeSavedEl) {
+          timeSavedEl.textContent = `${mins}m`;
+          
+          // --- NEW: HIDE IN MANGA MODE ---
+          if (timeSavedEl.parentElement) {
+            // Assuming the text is wrapped in a parent div/p, hide the whole line
+            timeSavedEl.parentElement.style.display = (typeof currentMode !== 'undefined' && currentMode === 'MANGA') ? 'none' : 'block';
+          }
+        }
       });
 
       // userId is defined globally in popup.js

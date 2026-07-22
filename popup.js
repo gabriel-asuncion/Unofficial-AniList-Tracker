@@ -115,10 +115,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- MODE TOGGLE (ANIME / MANGA) ---
   const modeBtn = document.getElementById('mode-toggle-btn');
   if (modeBtn) {
-    // Initial dropdown render on boot
     updateDropdownMenu();
 
     modeBtn.addEventListener('click', () => {
@@ -127,14 +125,34 @@ document.addEventListener('DOMContentLoaded', () => {
       modeBtn.textContent = currentMode === 'ANIME' ? '📺' : '📖';
       chrome.storage.local.set({ currentMode: currentMode });
       
-      // Set Defaults based on mode
       currentFilter = currentMode === 'ANIME' ? 'SCHEDULE' : 'CURRENT';
-      document.getElementById('current-view-label').textContent = currentMode === 'ANIME' ? 'Schedule (My List) ▾' : 'Currently Reading ▾';
+      const viewLabel = document.getElementById('current-view-label');
+      if (viewLabel) viewLabel.textContent = currentMode === 'ANIME' ? 'Schedule (My List) ▾' : 'Currently Reading ▾';
       
       updateDropdownMenu();
-      document.getElementById('search-input').value = ''; 
+      const searchInput = document.getElementById('search-input');
+      if (searchInput) searchInput.value = ''; 
       
-      if (accessToken) loadAnimeList();
+      // --- NEW: CONTEXT-AWARE REFRESH LOGIC ---
+      const profileView = document.getElementById('profile-view');
+      
+      // Check if the user is currently looking at their profile
+      if (profileView && !profileView.classList.contains('hidden')) {
+        if (typeof userId !== 'undefined' && userId) {
+          // Refresh the detailed stats dynamically
+          if (typeof loadDetailedStats === 'function') loadDetailedStats(userId);
+          
+          // Hide/Show the "Time Saved" element based on the mode
+          const timeSavedEl = document.getElementById('time-saved-display');
+          if (timeSavedEl && timeSavedEl.parentElement) {
+            timeSavedEl.parentElement.style.display = currentMode === 'ANIME' ? 'block' : 'none';
+          }
+        }
+      } else if (accessToken) {
+        // If they are on the main dashboard, reload the list normally
+        if (typeof loadAnimeList === 'function') loadAnimeList();
+      }
+      // ----------------------------------------
     });
   }
 
