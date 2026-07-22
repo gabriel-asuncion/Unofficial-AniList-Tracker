@@ -336,3 +336,189 @@ select, input {
   position: absolute; top: 10px; right: 10px; background: #E5C07B; color: #000;
   font-size: 10px; font-weight: bold; padding: 4px 8px; border-radius: 12px; z-index: 2;
 }
+
+/* --- UI/UX ENHANCEMENTS: SMOOTH TRANSITIONS --- */
+
+/* Apply this class to your main view wrappers in HTML later */
+.animated-view {
+  animation: fadeSlideIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+@keyframes fadeSlideIn {
+  from { 
+    opacity: 0; 
+    transform: translateY(15px) scale(0.98); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0) scale(1); 
+  }
+}
+
+/* Make dropdowns snap open cleanly */
+#filter-dropdown:not(.hidden) {
+  animation: dropDownOpen 0.2s ease-out forwards;
+  transform-origin: top left;
+}
+
+@keyframes dropDownOpen {
+  from { opacity: 0; transform: scaleY(0.8); }
+  to { opacity: 1; transform: scaleY(1); }
+}
+
+/* --- UI/UX ENHANCEMENTS: GRID VIEW TOGGLE --- */
+
+#anime-list.grid-layout {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 4px;
+}
+
+/* Transform the list container into a poster card */
+#anime-list.grid-layout .anime-list-item {
+  display: block; 
+  position: relative;
+  height: 150px;
+  padding: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #1a2636;
+  background-color: #0b1119;
+}
+
+/* 1. Full Cover Image with 10% Hover Zoom */
+#anime-list.grid-layout .anime-list-item img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  z-index: 1;
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+#anime-list.grid-layout .anime-list-item:hover img {
+  transform: scale(1.1); /* Zooms 10% from the center */
+}
+
+/* 2. Black Gradient Overlay */
+#anime-list.grid-layout .anime-list-item::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* Dark at the bottom for the title, dark at the top for the pills */
+  background: linear-gradient(to top, rgba(0,0,0, 0.95) 0%, rgba(0,0,0, 0.2) 40%, rgba(0,0,0, 0.6) 100%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* 3. Title: Bottom Middle, Max 2 Lines */
+#anime-list.grid-layout .anime-title-text {
+  position: absolute;
+  bottom: 8px;
+  left: 6px;
+  right: 6px;
+  z-index: 3;
+  white-space: normal !important;
+  display: -webkit-box;
+  -webkit-line-clamp: 2; /* Truncates overflow with ... */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-align: center;
+  font-size: 11px !important;
+  line-height: 1.3;
+  text-shadow: 1px 1px 3px #000;
+  pointer-events: none;
+}
+
+/* 4. Episode Counter: Top Left Pill */
+#anime-list.grid-layout .progress-text {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  background: rgba(11, 22, 34, 0.85);
+  color: #E5C07B;
+  padding: 3px 6px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 10px !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+/* 5. Add / +1 Button: Top Right */
+#anime-list.grid-layout .quick-add-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 4;
+  margin: 0 !important;
+  padding: 3px 8px !important;
+  height: auto;
+  border-radius: 12px !important;
+  font-size: 11px !important;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+}
+
+/* Hide the countdown texts in grid mode to save space */
+#anime-list.grid-layout .countdown-text,
+#anime-list.grid-layout .exact-air-time {
+  display: none;
+}
+:root {
+  /* Default AniList Blue, will be overwritten by JS */
+  --anilist-color: #3db4f2; 
+  /* A transparent version for backgrounds using modern CSS color-mix */
+  --anilist-color-bg: color-mix(in srgb, var(--anilist-color) 15%, transparent);
+}
+
+/* --- SMOOTH VIEW TRANSITIONS --- */
+/* Animates any view the moment the 'hidden' class is removed */
+#main-view:not(.hidden), 
+#profile-view:not(.hidden), 
+#settings-view:not(.hidden), 
+#recommendation-view:not(.hidden), 
+#detail-view:not(.hidden) {
+  animation: popSlideIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+@keyframes popSlideIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Ensure the search bar and toggle button align perfectly */
+#search-input,
+#layout-toggle-btn {
+  height: 36px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- UI ALIGNMENT FIXES --- */
+/* Force all header and utility buttons/inputs to share exact dimensions */
+#search-input,
+#layout-toggle-btn,
+#mode-toggle-btn,
+#settings-btn {
+  height: 36px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0; 
+}
+
+/* Specific fix for the search input to ensure text centers nicely */
+#search-input {
+  justify-content: flex-start;
+  padding: 0 12px;
+}

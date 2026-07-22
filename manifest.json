@@ -23,10 +23,12 @@
     "identity",
     "cookies",
     "activeTab",
-    "notifications"
+    "notifications",
+    "alarms" 
   ],
   "host_permissions": [
     "https://graphql.anilist.co/*",
+    "https://api.aniskip.com/*",
     "https://anilist.co/*",
     "https://*.supabase.co/*"
   ],
