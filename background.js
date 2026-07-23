@@ -893,13 +893,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; 
   }
 
-  // MAL BACKGROUND AUTH FLOW
+  // --- MAL BACKGROUND AUTH FLOW (DIAGNOSTIC VERSION) ---
   else if (message.action === "LOGIN_MAL") {
     (async () => {
       try {
         const cleanClientId = typeof MAL_CLIENT_ID !== 'undefined' ? MAL_CLIENT_ID.trim() : "";
         if (!cleanClientId || cleanClientId.includes('YOUR_MAL_CLIENT_ID')) {
-          console.error("🚨 MAL Client ID is missing in config.js!");
+          console.error("🚨 MAL Client ID is missing or default in config.js!");
           return;
         }
 
@@ -921,6 +921,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!redirectUri.endsWith('/')) redirectUri += '/';
 
         const authUrl = `https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${cleanClientId}&code_challenge=${codeVerifier}&code_challenge_method=plain&state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+        // --- DIAGNOSTIC LOGS ---
+        console.log("------------------------------------");
+        console.log("🔑 MAL Client ID:", cleanClientId);
+        console.log("🌐 Extension Redirect URI:", redirectUri);
+        console.log("🔗 Full Auth URL:", authUrl);
+        console.log("------------------------------------");
 
         console.log("🔗 Launching MAL Auth Window from Background...");
         
@@ -961,7 +968,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
             console.log("🎉 SUCCESS! MAL Token permanently saved to Chrome Storage.");
           } else {
-            console.error("🚨 MAL rejected the token exchange. Response Data:", tokenData);
+            console.error("🚨 MAL rejected token exchange:", tokenData);
           }
         }
       } catch (err) {
