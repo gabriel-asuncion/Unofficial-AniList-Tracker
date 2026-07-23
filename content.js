@@ -211,43 +211,45 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
               }
             }
 
-            // Unlock the state once the background script responds
-        if (response && response.otgTime !== undefined && response.otgTime !== null && mangaOtgLoaded === 'fetching') {
-          mangaOtgLoaded = true;
-          
-          if (readingType === 'scroll' && response.otgTime > 5) {
-            const targetPct = response.otgTime;
-            const targetScroll = maxScroll * (targetPct / 100);
-            window.scrollTo({ top: targetScroll, behavior: 'smooth' });
-            showInPageToast('info', 'OTG Resumed', `Scrolled to ${targetPct.toFixed(1)}% successfully.`);
-          }
-          // --- NEW: AUTO-REDIRECT FOR PAGINATED MANGA ---
-          else if (readingType === 'page' && response.otgTime > 0) {
+        // --- UPDATED: BULLETPROOF OTG SEEK & TOAST ENGINE ---
+        if (response && response.otgTime !== undefined && response.otgTime !== null && otgLoaded === 'fetching') {
+          otgLoaded = true;
+          const targetTime = response.otgTime;
+
+          // Resume playback if saved position is greater than 5 seconds and user is near video start
+          if (targetTime > 5 && trackedVideo.currentTime < 15) {
             
-            // If they are on the wrong page, and we have a valid URL, redirect them!
-            if (currentProg !== response.otgTime && response.otgUrl && window.location.href !== response.otgUrl) {
-              showInPageToast('info', 'OTG Resuming', `Jumping to Page ${response.otgTime}...`);
-              
-              // Give the user 1.5 seconds to read the toast before redirecting
-              setTimeout(() => {
-                window.location.href = response.otgUrl;
-              }, 1500); 
-            } 
-            // If they are already on the right page, just welcome them back
-            else if (currentProg === response.otgTime) {
-              showInPageToast('info', 'OTG Resumed', `Welcome back to Page ${response.otgTime}!`);
+            const executeSeek = () => {
+              try {
+                trackedVideo.currentTime = targetTime;
+                
+                const mins = Math.floor(targetTime / 60);
+                const secs = Math.floor(targetTime % 60).toString().padStart(2, '0');
+                showInPageToast('info', 'OTG Resumed', `Jumped to ${mins}:${secs} successfully.`);
+              } catch (err) {
+                console.error("[OTG Seek Error]:", err);
+              }
+            };
+
+            // If video metadata is already loaded, seek immediately
+            if (trackedVideo.readyState >= 1) {
+              executeSeek();
+            } else {
+              // Otherwise, wait for the video player metadata to load before seeking
+              trackedVideo.addEventListener('loadedmetadata', executeSeek, { once: true });
+              trackedVideo.addEventListener('canplay', executeSeek, { once: true });
             }
           }
-          
-        } else if (response && response.otgTime === null && mangaOtgLoaded === 'fetching') {
-          mangaOtgLoaded = true; 
+        } else if (response && response.otgTime === null && otgLoaded === 'fetching') {
+          otgLoaded = true; 
         }
           }); 
         } catch (e) {
           if (e.message.includes("Extension context invalidated")) clearInterval(trackerIntervalId);
         }
 
-      if ((trackedVideo.currentTime / trackedVideo.duration) * 100 >= userThreshold && !hasTriggeredUpdate) {
+      // NEW: Guard against glitchy 0-second metadata loads instantly completing the series!
+      if (trackedVideo.duration > 180 && trackedVideo.currentTime > 60 && (trackedVideo.currentTime / trackedVideo.duration) * 100 >= userThreshold && !hasTriggeredUpdate) {
         hasTriggeredUpdate = true;
         try {
           chrome.runtime.sendMessage({ action: "AUTO_UPDATE_ANIME", trueWatchSeconds: activeWatchSeconds }).catch(() => {});

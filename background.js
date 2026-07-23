@@ -13,21 +13,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "processOfflineQueue") {
     processOfflineQueue();
   } else if (alarm.name === "airingCheck") {
-    checkForNewEpisodes(); // NEW: Trigger the notification engine
+    checkForNewEpisodes(); 
   }
 });
 
 // Create the alarms when the extension starts
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("processOfflineQueue", { periodInMinutes: 15 });
-  chrome.alarms.create("airingCheck", { periodInMinutes: 30 }); // NEW: 30 min interval
+  chrome.alarms.create("airingCheck", { periodInMinutes: 30 }); 
 });
 
 async function queueFailedUpdate(mediaId, progress, status, token) {
   const res = await chrome.storage.local.get(['offlineQueue']);
   const offlineQueue = res.offlineQueue || [];
   
-  // Prevent duplicate queues for the same episode
   const isDupe = offlineQueue.some(item => item.mediaId === mediaId && item.progress === progress);
   if (!isDupe) {
     offlineQueue.push({ mediaId, progress, status, token, timestamp: Date.now() });
@@ -57,7 +56,7 @@ async function processOfflineQueue() {
       console.log(`[Offline Queue] Success! Synced Media ${item.mediaId} Ep ${item.progress}`);
     } catch (e) {
       console.log(`[Offline Queue] Still offline. Keeping Media ${item.mediaId} in queue.`);
-      remainingQueue.push(item); // Keep in queue if it fails again
+      remainingQueue.push(item);
     }
   }
   
@@ -86,7 +85,130 @@ function getTodayFuzzy() {
   const d = new Date();
   return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
 }
-// NEW: Converts a title string into a unique negative integer
+
+// ==========================================
+// 🌐 MAL API ADAPTER
+// ==========================================
+
+async function malApiRequest(endpoint, method = 'GET', data = null, token) {
+  const options = {
+    method: method,
+    headers: { 'Authorization': `Bearer ${token}` }
+  };
+  
+  if (data && method !== 'GET') {
+    options.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    options.body = new URLSearchParams(data).toString();
+  }
+  
+  const response = await fetch(`https://api.myanimelist.net/v2/${endpoint}`, options);
+  if (!response.ok) throw new Error(`MAL API Error: ${response.status}`);
+  return response.json();
+}
+
+function standardizeMalMedia(malNode, listStatus, type) {
+  let standardStatus = 'PLANNING';
+  if (listStatus) {
+    if (listStatus.status === 'watching' || listStatus.status === 'reading') standardStatus = 'CURRENT';
+    else if (listStatus.status === 'completed') standardStatus = 'COMPLETED';
+    else if (listStatus.status === 'on_hold') standardStatus = 'PAUSED';
+    else if (listStatus.status === 'dropped') standardStatus = 'DROPPED';
+    else if (listStatus.status === 'plan_to_watch' || listStatus.status === 'plan_to_read') standardStatus = 'PLANNING';
+  }
+
+  return {
+    id: malNode.id,
+    idMal: malNode.id,
+    isMalOnly: true,
+    status: malNode.status ? malNode.status.toUpperCase() : "RELEASING",
+    title: { 
+      romaji: malNode.title, 
+      english: malNode.alternative_titles?.en || malNode.title 
+    },
+    coverImage: { 
+      large: malNode.main_picture?.large || '', 
+      medium: malNode.main_picture?.medium || '' 
+    },
+    episodes: type === 'ANIME' ? (malNode.num_episodes || null) : null,
+    chapters: type === 'MANGA' ? (malNode.num_chapters || null) : null,
+    mediaListEntry: listStatus ? {
+      id: malNode.id,
+      progress: type === 'ANIME' ? listStatus.num_episodes_watched : listStatus.num_chapters_read,
+      status: standardStatus,
+      score: listStatus.score || 0
+    } : null
+  };
+}
+
+async function updateMalProgress(malId, progress, status, type, token) {
+  const endpoint = type === 'ANIME' ? `anime/${malId}/my_list_status` : `manga/${malId}/my_list_status`;
+  
+  let malStatus = 'plan_to_watch';
+  if (type === 'MANGA') {
+    if (status === 'CURRENT') malStatus = 'reading';
+    else if (status === 'COMPLETED') malStatus = 'completed';
+    else if (status === 'PAUSED') malStatus = 'on_hold';
+    else if (status === 'DROPPED') malStatus = 'dropped';
+    else malStatus = 'plan_to_read';
+  } else {
+    if (status === 'CURRENT') malStatus = 'watching';
+    else if (status === 'COMPLETED') malStatus = 'completed';
+    else if (status === 'PAUSED') malStatus = 'on_hold';
+    else if (status === 'DROPPED') malStatus = 'dropped';
+  }
+
+  const payload = { status: malStatus };
+  if (type === 'ANIME') payload.num_watched_episodes = progress;
+  if (type === 'MANGA') payload.num_chapters_read = progress;
+
+  return await malApiRequest(endpoint, 'PUT', payload, token);
+}
+
+async function refreshMalToken() {
+  const storage = await chrome.storage.local.get(['malRefreshToken']);
+  if (!storage.malRefreshToken) return null;
+
+  try {
+    const response = await fetch('https://myanimelist.net/v1/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: SECOND_CLIENT_ID,
+        grant_type: 'refresh_token',
+        refresh_token: storage.malRefreshToken
+      })
+    });
+
+    const data = await response.json();
+    if (data.access_token) {
+      await chrome.storage.local.set({
+        malToken: data.access_token,
+        malRefreshToken: data.refresh_token
+      });
+      return data.access_token;
+    }
+    return null;
+  } catch (error) {
+    console.error("Failed to refresh MAL token:", error);
+    return null;
+  }
+}
+
+async function safeMalApiRequest(endpoint, method = 'GET', data = null, token) {
+  try {
+    return await malApiRequest(endpoint, method, data, token);
+  } catch (error) {
+    if (error.message.includes('401')) {
+      console.log("MAL token expired. Attempting refresh...");
+      const newToken = await refreshMalToken();
+      if (newToken) {
+        return await malApiRequest(endpoint, method, data, newToken);
+      }
+    }
+    throw error;
+  }
+}
+
 function hashStringToNegativeInt(str) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -97,7 +219,6 @@ function hashStringToNegativeInt(str) {
   return -Math.abs(hash || 999999);
 }
 
-// NEW: Now selects and returns both playback_time and source_url
 async function getOtgTimeFromSupabase(userId, mediaId, episode) {
   try {
     const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&media_id=eq.${mediaId}&episode=eq.${episode}&select=playback_time,source_url`;
@@ -111,8 +232,7 @@ async function getOtgTimeFromSupabase(userId, mediaId, episode) {
   } catch (error) { return null; }
 }
 
-// UPDATED: Now accepts customTitle
-async function saveOtgTimeToSupabase(userId, mediaId, episode, time, sourceUrl, customTitle = null) {
+async function saveOtgTimeToSupabase(userId, mediaId, episode, time, sourceUrl, customTitle = null, platform = 'ANILIST') {
   try {
     const url = `${SUPABASE_URL}/rest/v1/otg_saves?on_conflict=anilist_user_id,media_id,episode`;
     await fetch(url, {
@@ -129,7 +249,8 @@ async function saveOtgTimeToSupabase(userId, mediaId, episode, time, sourceUrl, 
         episode: episode, 
         playback_time: time,
         source_url: sourceUrl,
-        custom_title: customTitle // NEW: Save the title for non-AniList manga
+        custom_title: customTitle,
+        platform: platform
       })
     });
   } catch (error) {}
@@ -161,7 +282,6 @@ async function findAniListMedia(tabTitle) {
   let parsedTitle = match[1].replace(/[-|—–:~]+$/g, '').replace(/\s+\(?(?:Sub|Dub)\)?$/i, '').trim();
   const episode = parseInt(match[2], 10);
 
-  // --- UPDATED: Added 'idMal' to the query so AniSkip can use it! ---
   const query = `
     query ($search: String) {
       Media (search: $search, type: ANIME, sort: SEARCH_MATCH) {
@@ -212,6 +332,9 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds) {
     const animeName = media.title.english || media.title.romaji;
     let isCompleted = false; 
 
+    const storage = await chrome.storage.local.get(['anilistUserId', 'malToken']);
+    let updatedPlatforms = [];
+
     if (currentProg < episode) {
       let newStatus = 'CURRENT';
       let startedAt = undefined;
@@ -224,28 +347,42 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds) {
         isCompleted = true; 
       }
 
-      const mutation = `
-        mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
-          SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id }
-        }
-      `;
-
-      const variables = { mediaId: media.id, progress: episode, status: newStatus };
-      if (startedAt) variables.startedAt = startedAt;
-      if (completedAt) variables.completedAt = completedAt;
-
       try {
+        const mutation = `
+          mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
+            SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id }
+          }
+        `;
+        const variables = { mediaId: media.id, progress: episode, status: newStatus };
+        if (startedAt) variables.startedAt = startedAt;
+        if (completedAt) variables.completedAt = completedAt;
+
         await apiRequest(mutation, variables, token);
-        // If successful, attempt to clear any offline queue items!
+        updatedPlatforms.push("AniList");
         processOfflineQueue(); 
       } catch (networkError) {
-        // --- NEW: If AniList fails, push to our Offline Queue! ---
         queueFailedUpdate(media.id, episode, newStatus, token);
       }
 
-      const userStorage = await chrome.storage.local.get(['anilistUserId']);
-      if (userStorage.anilistUserId) {
-        syncUserStatsToSupabase(userStorage.anilistUserId, trueWatchSeconds);
+      if (media.idMal && storage.malToken) {
+        try {
+          await safeMalApiRequest(
+            `anime/${media.idMal}/my_list_status`, 
+            'PUT', 
+            { 
+              status: newStatus === 'CURRENT' ? 'watching' : newStatus.toLowerCase(), 
+              num_watched_episodes: episode 
+            }, 
+            storage.malToken
+          );
+          updatedPlatforms.push("MAL");
+        } catch (e) {
+          console.error("MAL Dual-Sync Failed:", e);
+        }
+      }
+
+      if (storage.anilistUserId) {
+        syncUserStatsToSupabase(storage.anilistUserId, trueWatchSeconds);
       }
       
     } else if (media.episodes && currentProg >= media.episodes) {
@@ -254,25 +391,24 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds) {
 
     delete activeSessions[tabId];
 
-    const userStorage = await chrome.storage.local.get(['anilistUserId']);
-    if (userStorage.anilistUserId) {
-      await deleteOtgTimeFromSupabase(userStorage.anilistUserId, media.id, episode);
+    if (storage.anilistUserId) {
+      await deleteOtgTimeFromSupabase(storage.anilistUserId, media.id, episode);
     }
 
     chrome.action.setBadgeBackgroundColor({ color: '#4cca51' }); 
     chrome.action.setBadgeText({ text: '✓' });
     
+    let platformText = updatedPlatforms.length > 1 ? "both AniList & MAL" : (updatedPlatforms[0] || "API");
+    let toastMessage = `${animeName} updated to Episode ${episode} on ${platformText}!`;
+    
+    if (updatedPlatforms.length === 0 && currentProg >= episode) {
+        toastMessage = `${animeName} is already at Episode ${episode}!`;
+    }
+
     if (isCompleted) {
-      chrome.tabs.sendMessage(tabId, {
-        action: "SHOW_RATING_MODAL",
-        mediaId: media.id,
-        animeName: animeName
-      }, { frameId: 0 });
-    } else {
-      chrome.tabs.sendMessage(tabId, {
-        action: "SHOW_SUCCESS_TOAST",
-        message: `${animeName} updated to Episode ${episode}!`
-      }, { frameId: 0 }); 
+      chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, animeName: animeName }, { frameId: 0 });
+    } else if (updatedPlatforms.length > 0) {
+      chrome.tabs.sendMessage(tabId, { action: "SHOW_SUCCESS_TOAST", message: toastMessage }, { frameId: 0 }); 
     }
 
   } catch (error) {
@@ -282,35 +418,48 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds) {
   }
 }
 
-// --- NEW: MANGA SEARCHER ---
-async function findAniListManga(cleanTitle, chapter) {
-  const storage = await chrome.storage.local.get(['anilistToken']);
-  const token = storage.anilistToken;
-  if (!token) return null;
-
-  // Added "status" to the requested Media fields
-  const query = `
-    query ($search: String) {
-      Media (search: $search, type: MANGA, sort: SEARCH_MATCH) {
-        id status title { romaji english } coverImage { large } chapters
-        mediaListEntry { id progress status }
+// --- UPDATED: UNIFIED MANGA SEARCHER (AniList -> MAL -> Custom) ---
+async function findUnifiedManga(cleanTitle, chapter) {
+  const storage = await chrome.storage.local.get(['anilistToken', 'malToken']);
+  
+  // 1. Try AniList First
+  if (storage.anilistToken) {
+    const aniQuery = `
+      query ($search: String) {
+        Media (search: $search, type: MANGA, sort: SEARCH_MATCH) {
+          id idMal status title { romaji english } coverImage { large } chapters
+          mediaListEntry { id progress status }
+        }
       }
-    }
-  `;
-
-  try {
-    const res = await apiRequest(query, { search: cleanTitle }, token);
-    const media = res.data?.Media || null;
-    return { media, chapter, token };
-  } catch (e) {
-    return null;
+    `;
+    try {
+      const aniRes = await apiRequest(aniQuery, { search: cleanTitle }, storage.anilistToken);
+      if (aniRes.data?.Media) {
+        return { media: aniRes.data.Media, chapter, token: storage.anilistToken, platform: 'ANILIST' };
+      }
+    } catch (e) { console.log("AniList search failed, falling back to MAL..."); }
   }
+
+  // 2. Try MAL if AniList returned null
+  if (storage.malToken) {
+    try {
+      const searchRes = await malApiRequest(`manga?q=${encodeURIComponent(cleanTitle)}&limit=1&fields=id,title,alternative_titles,main_picture,status,num_chapters,my_list_status`, 'GET', null, storage.malToken);
+      
+      if (searchRes.data && searchRes.data.length > 0) {
+        const malNode = searchRes.data[0].node;
+        const standardizedMedia = standardizeMalMedia(malNode, malNode.my_list_status, 'MANGA');
+        return { media: standardizedMedia, chapter, token: storage.malToken, platform: 'MAL' };
+      }
+    } catch (e) { console.log("MAL search failed, falling back to Custom OTG..."); }
+  }
+
+  // 3. Fallback to Custom Negative ID (OTG Only)
+  return null; 
 }
 
-// --- NEW: MANGA AUTO-UPDATE PROCESSOR ---
 async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSeconds) {
   try {
-    const result = await findAniListManga(cleanTitle, chapter);
+    const result = await findUnifiedManga(cleanTitle, chapter);
     
     if (!result || !result.media) {
       chrome.action.setBadgeBackgroundColor({ color: '#e74c3c' });
@@ -318,10 +467,13 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
       return;
     }
 
-    const { media, token } = result;
+    const { media, token, platform } = result;
     const currentProg = media.mediaListEntry ? media.mediaListEntry.progress : 0;
     const mangaName = media.title.english || media.title.romaji;
     let isCompleted = false; 
+
+    const storage = await chrome.storage.local.get(['anilistUserId', 'malToken']);
+    let updatedPlatforms = [];
 
     if (currentProg < chapter) {
       let newStatus = 'CURRENT';
@@ -329,62 +481,85 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
       let completedAt = undefined;
       
       if (chapter === 1 && currentProg === 0) startedAt = getTodayFuzzy();
-      
-      // STRICT COMPLETION: Must reach final chapter AND series must be fully published
       if (media.chapters && chapter >= media.chapters && media.status === 'FINISHED') {
         newStatus = 'COMPLETED';
         completedAt = getTodayFuzzy();
         isCompleted = true; 
       }
 
-      const mutation = `
-        mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
-          SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id }
+      if (platform === 'ANILIST') {
+        try {
+          const mutation = `
+            mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
+              SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id }
+            }
+          `;
+          const variables = { mediaId: media.id, progress: chapter, status: newStatus };
+          if (startedAt) variables.startedAt = startedAt;
+          if (completedAt) variables.completedAt = completedAt;
+          
+          await apiRequest(mutation, variables, token);
+          updatedPlatforms.push("AniList");
+          processOfflineQueue(); 
+        } catch (networkError) {
+          queueFailedUpdate(media.id, chapter, newStatus, token);
         }
-      `;
 
-      const variables = { mediaId: media.id, progress: chapter, status: newStatus };
-      if (startedAt) variables.startedAt = startedAt;
-      if (completedAt) variables.completedAt = completedAt;
-
-      try {
-        await apiRequest(mutation, variables, token);
-        processOfflineQueue(); 
-      } catch (networkError) {
-        queueFailedUpdate(media.id, chapter, newStatus, token);
+        if (media.idMal && storage.malToken) {
+          try {
+            await safeMalApiRequest(
+              `manga/${media.idMal}/my_list_status`, 
+              'PUT', 
+              { status: newStatus === 'CURRENT' ? 'reading' : newStatus.toLowerCase(), num_chapters_read: chapter }, 
+              storage.malToken
+            );
+            updatedPlatforms.push("MAL");
+          } catch (e) {
+            console.error("MAL Dual-Sync Failed:", e);
+          }
+        }
+      } else if (platform === 'MAL') {
+        try {
+          await safeMalApiRequest(
+            `manga/${media.id}/my_list_status`, 
+            'PUT', 
+            { status: newStatus === 'CURRENT' ? 'reading' : newStatus.toLowerCase(), num_chapters_read: chapter }, 
+            token
+          );
+          updatedPlatforms.push("MAL");
+        } catch (e) {
+          console.error("MAL Update Failed:", e);
+        }
       }
 
-      const userStorage = await chrome.storage.local.get(['anilistUserId']);
-      if (userStorage.anilistUserId) {
-        syncUserStatsToSupabase(userStorage.anilistUserId, trueReadSeconds);
+      if (storage.anilistUserId) {
+        syncUserStatsToSupabase(storage.anilistUserId, trueReadSeconds);
       }
       
     } else if (media.chapters && currentProg >= media.chapters && media.status === 'FINISHED') {
-      // Catch edge case where they reread the final chapter of a finished series
       isCompleted = true;
     }
 
     delete activeSessions[tabId];
 
-    const userStorage = await chrome.storage.local.get(['anilistUserId']);
-    if (userStorage.anilistUserId) {
-      await deleteOtgTimeFromSupabase(userStorage.anilistUserId, media.id, chapter);
+    if (storage.anilistUserId) {
+      await deleteOtgTimeFromSupabase(storage.anilistUserId, media.id, chapter);
     }
 
     chrome.action.setBadgeBackgroundColor({ color: '#4cca51' }); 
     chrome.action.setBadgeText({ text: '✓' });
     
+    let platformText = updatedPlatforms.length > 1 ? "both AniList & MAL" : (updatedPlatforms[0] || "API");
+    let toastMessage = `${mangaName} updated to Chapter ${chapter} on ${platformText}!`;
+    
+    if (updatedPlatforms.length === 0 && currentProg >= chapter) {
+        toastMessage = `${mangaName} is already at Chapter ${chapter}!`;
+    }
+
     if (isCompleted) {
-      chrome.tabs.sendMessage(tabId, {
-        action: "SHOW_RATING_MODAL",
-        mediaId: media.id,
-        animeName: mangaName
-      }, { frameId: 0 });
-    } else {
-      chrome.tabs.sendMessage(tabId, {
-        action: "SHOW_SUCCESS_TOAST",
-        message: `${mangaName} updated to Chapter ${chapter}!`
-      }, { frameId: 0 }); 
+      chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, animeName: mangaName }, { frameId: 0 });
+    } else if (updatedPlatforms.length > 0) {
+      chrome.tabs.sendMessage(tabId, { action: "SHOW_SUCCESS_TOAST", message: toastMessage }, { frameId: 0 }); 
     }
 
   } catch (error) {
@@ -491,8 +666,7 @@ async function syncUserStatsToSupabase(userId, addedSeconds, isRetroactive = fal
 chrome.tabs.onRemoved.addListener((tabId) => {
   const session = activeSessions[tabId];
   if (session) {
-    // Pass the saved session.url to the Supabase function
-    saveOtgTimeToSupabase(session.userId, session.mediaId, session.episode, session.time, session.url);
+    saveOtgTimeToSupabase(session.userId, session.mediaId, session.episode, session.time, session.url, session.customTitle, session.platform);
     delete activeSessions[tabId];
   }
 });
@@ -515,16 +689,77 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false; 
   } 
   
-  // --- NEW: 1b. AUTO-UPDATE (MANGA) ---
+  // LIVE ANIME PROGRESS & ANISKIP FETCHER
+  else if (message.action === "LIVE_VIDEO_PROGRESS") {
+    if (message.hasTriggeredUpdate) {
+      chrome.action.setBadgeBackgroundColor({ color: '#4cca51' });
+      chrome.action.setBadgeText({ text: '✓' });
+    } else if (message.progress > 0) {
+      chrome.action.setBadgeBackgroundColor({ color: '#3db4f2' });
+      chrome.action.setBadgeText({ text: `${Math.floor(message.progress)}%` });
+    }
+
+    if (message.isOtgLoaded === false && sender.tab) {
+      (async () => {
+        try {
+          const result = await findAniListMedia(sender.tab.title);
+          let storage = await chrome.storage.local.get(['anilistUserId']);
+
+          if (result && result.media && storage.anilistUserId) {
+            const mediaId = result.media.id;
+            const episode = result.episode;
+            const cacheKey = `${storage.anilistUserId}_${mediaId}_${episode}_anime`;
+            
+            deleteOldEpisodesFromSupabase(storage.anilistUserId, mediaId, episode);
+            lastSaveTimes[cacheKey] = Date.now(); 
+
+            const savedData = await getOtgTimeFromSupabase(storage.anilistUserId, mediaId, episode);
+            
+            sendResponse({
+              otgTime: savedData ? savedData.time : null,
+              resolvedData: { mediaId: mediaId, malId: result.media.idMal, episode: episode, cacheKey, platform: 'ANILIST' }
+            });
+          } else {
+            sendResponse({ otgTime: null, resolvedData: null });
+          }
+        } catch(e) { sendResponse({ otgTime: null, resolvedData: null }); }
+      })();
+      return true;
+    } else if (message.resolvedData && message.currentTime) {
+      const { mediaId, episode, cacheKey, platform } = message.resolvedData;
+      const now = Date.now();
+      const tabUrl = sender.tab ? sender.tab.url : null;
+      
+      if (!message.hasTriggeredUpdate) {
+        chrome.storage.local.get(['anilistUserId'], (res) => {
+          const userId = res.anilistUserId;
+          if (userId) {
+            activeSessions[sender.tab.id] = { userId, mediaId, episode, time: message.currentTime, url: tabUrl, customTitle: null, platform };
+            
+            if (!lastSaveTimes[cacheKey] || now - lastSaveTimes[cacheKey] > 5000) {
+              lastSaveTimes[cacheKey] = now;
+              saveOtgTimeToSupabase(userId, mediaId, episode, message.currentTime, tabUrl, null, platform);
+            }
+          }
+        });
+      }
+      sendResponse({ otgTime: null });
+      return false;
+    }
+    
+    sendResponse({ success: true });
+    return false;
+  }
+  
+  // AUTO-UPDATE (MANGA)
   else if (message.action === "AUTO_UPDATE_MANGA") {
     processMangaAutoUpdate(message.cleanTitle, message.chapter, sender.tab.id, message.trueReadSeconds || 0);
     sendResponse({ success: true }); 
     return false; 
   }
 
-  // --- LIVE MANGA PROGRESS & BADGE TRACKER ---
+  // LIVE MANGA PROGRESS & BADGE TRACKER
   else if (message.action === "LIVE_MANGA_PROGRESS") {
-    // 1. Badge Updates
     chrome.action.setBadgeBackgroundColor({ color: message.isCompleted ? '#4cca51' : '#3db4f2' });
     if (message.readingType === 'page') {
       chrome.action.setBadgeText({ text: `${message.progress}` }); 
@@ -535,26 +770,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       else chrome.action.setBadgeText({ text: '...' });
     }
     
-    // 2. OTG Database Saving Logic
     if (message.isOtgLoaded === false && message.parsedTitle && message.chapter !== null) {
       (async () => {
         try {
-          const query = `query ($search: String) { Media (search: $search, type: MANGA, sort: SEARCH_MATCH) { id } }`;
-          let storage = await chrome.storage.local.get(['anilistToken', 'anilistUserId']);
-          if (!storage.anilistToken || !storage.anilistUserId) return sendResponse({ otgTime: null });
+          let storage = await chrome.storage.local.get(['anilistToken', 'anilistUserId', 'malToken']);
+          if (!storage.anilistUserId) return sendResponse({ otgTime: null });
 
-          const res = await apiRequest(query, { search: message.parsedTitle }, storage.anilistToken);
-          const media = res.data?.Media;
+          const result = await findUnifiedManga(message.parsedTitle, message.chapter);
 
-          // NEW: Fallback Logic
           let mediaId;
           let isCustom = false;
           let customTitle = null;
+          let platformType = 'CUSTOM';
 
-          if (media) {
-            mediaId = media.id;
+          if (result && result.media) {
+            mediaId = result.media.id;
+            platformType = result.platform || 'ANILIST';
           } else {
-            // Generate a negative ID and flag it as custom!
             mediaId = hashStringToNegativeInt(message.parsedTitle);
             isCustom = true;
             customTitle = message.parsedTitle;
@@ -573,8 +805,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ 
             otgTime: savedTime, 
             otgUrl: savedUrl, 
-            // Pass the custom flags down to content.js
-            resolvedData: { userId: storage.anilistUserId, mediaId, episode, cacheKey, isCustom, customTitle } 
+            resolvedData: { userId: storage.anilistUserId, mediaId, episode, cacheKey, isCustom, customTitle, platform: platformType } 
           });
 
         } catch (error) { sendResponse({ otgTime: null }); }
@@ -582,8 +813,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true; 
       
     } else if (message.resolvedData) {
-      // NEW: Extract customTitle from the resolved data
-      const { userId, mediaId, episode, cacheKey, customTitle } = message.resolvedData;
+      const { userId, mediaId, episode, cacheKey, customTitle, platform } = message.resolvedData;
       const now = Date.now();
       const tabUrl = sender.tab ? sender.tab.url : null;
       
@@ -591,13 +821,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       if (!message.isCompleted) {
         if (sender.tab && sender.tab.id) {
-          activeSessions[sender.tab.id] = { userId, mediaId, episode, time: saveValue, url: tabUrl };
+          activeSessions[sender.tab.id] = { userId, mediaId, episode, time: saveValue, url: tabUrl, customTitle, platform };
         }
         
         if (!lastSaveTimes[cacheKey] || now - lastSaveTimes[cacheKey] > 5000) {
           lastSaveTimes[cacheKey] = now;
-          // Pass the custom title into the save function
-          saveOtgTimeToSupabase(userId, mediaId, episode, saveValue, tabUrl, customTitle);
+          saveOtgTimeToSupabase(userId, mediaId, episode, saveValue, tabUrl, customTitle, platform);
         }
       }
       sendResponse({ otgTime: null });
@@ -608,9 +837,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  // --- 3. NEW: THE ANISKIP NETWORK FETCHER (OP & ED) ---
+  // ANISKIP NETWORK FETCHER
   else if (message.action === "FETCH_ANISKIP") {
-    // We now fetch BOTH Opening (op) and Ending (ed) times!
     const url = `https://api.aniskip.com/v2/skip-times/${message.malId}/${message.episode}?types=op&types=ed&episodeLength=0`;
     
     fetch(url)
@@ -620,7 +848,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; 
   }
   
-  // 4. SAVE SCORE MODAL
+  // SAVE SCORE MODAL
   else if (message.action === "SAVE_ANIME_SCORE") {
     const mutation = `mutation ($mediaId: Int, $scoreRaw: Int) { SaveMediaListEntry(mediaId: $mediaId, scoreRaw: $scoreRaw) { id score } }`;
     chrome.storage.local.get(['anilistToken'], async (res) => {
@@ -634,7 +862,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; 
   }
 
-  // 5. RETROACTIVE HISTORY SYNC
+  // RETROACTIVE HISTORY SYNC
   else if (message.action === "SYNC_PAST_HISTORY") {
     chrome.storage.local.get(['anilistToken', 'anilistUserId'], async (res) => {
       if (!res.anilistToken || !res.anilistUserId) {
@@ -664,7 +892,201 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true; 
   }
-  
+
+  // MAL BACKGROUND AUTH FLOW
+  else if (message.action === "LOGIN_MAL") {
+    (async () => {
+      try {
+        const cleanClientId = typeof MAL_CLIENT_ID !== 'undefined' ? MAL_CLIENT_ID.trim() : "";
+        if (!cleanClientId || cleanClientId.includes('YOUR_MAL_CLIENT_ID')) {
+          console.error("🚨 MAL Client ID is missing in config.js!");
+          return;
+        }
+
+        function generateCodeVerifier() {
+          const validChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+          let verifier = '';
+          const randomValues = new Uint8Array(128);
+          crypto.getRandomValues(randomValues);
+          for (let i = 0; i < randomValues.length; i++) {
+            verifier += validChars[randomValues[i] % validChars.length];
+          }
+          return verifier;
+        }
+
+        const codeVerifier = generateCodeVerifier();
+        const state = generateCodeVerifier().substring(0, 16); 
+        
+        let redirectUri = chrome.identity.getRedirectURL(); 
+        if (!redirectUri.endsWith('/')) redirectUri += '/';
+
+        const authUrl = `https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${cleanClientId}&code_challenge=${codeVerifier}&code_challenge_method=plain&state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+        console.log("🔗 Launching MAL Auth Window from Background...");
+        
+        const redirectUrlResult = await chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true });
+        
+        console.log("✅ Auth Window Closed. Returned URL:", redirectUrlResult);
+
+        const url = new URL(redirectUrlResult);
+        const code = url.searchParams.get('code');
+        const returnedState = url.searchParams.get('state');
+
+        if (returnedState !== state) {
+          console.error("🚨 State mismatch! Security check failed.");
+          return;
+        }
+
+        if (code) {
+          console.log("🔑 Authorization Code received! Exchanging for Token...");
+          
+          const tokenResponse = await fetch('https://myanimelist.net/v1/oauth2/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              client_id: cleanClientId,
+              code: code,
+              code_verifier: codeVerifier,
+              grant_type: 'authorization_code',
+              redirect_uri: redirectUri
+            })
+          });
+
+          const tokenData = await tokenResponse.json();
+          
+          if (tokenData.access_token) {
+            await chrome.storage.local.set({
+              malToken: tokenData.access_token,
+              malRefreshToken: tokenData.refresh_token
+            });
+            console.log("🎉 SUCCESS! MAL Token permanently saved to Chrome Storage.");
+          } else {
+            console.error("🚨 MAL rejected the token exchange. Response Data:", tokenData);
+          }
+        }
+      } catch (err) {
+        console.error("🚨 Background Auth Flow Crashed:", err);
+      }
+    })();
+    
+    return true; 
+  }
+
+  // SMART MERGE ENGINE
+  else if (message.action === "SYNC_SMART_MERGE") {
+    (async () => {
+      try {
+        const storage = await chrome.storage.local.get(['anilistToken', 'anilistUserId', 'malToken']);
+        if (!storage.anilistToken || !storage.malToken || !storage.anilistUserId) return;
+
+        const alQuery = `
+          query ($userId: Int) {
+            MediaListCollection(userId: $userId, type: ANIME) {
+              lists { entries { progress status media { id idMal title { english romaji } } } }
+            }
+          }
+        `;
+        const alRes = await apiRequest(alQuery, { userId: storage.anilistUserId }, storage.anilistToken);
+        const alEntries = [];
+        alRes.data?.MediaListCollection?.lists?.forEach(l => alEntries.push(...l.entries));
+
+        let malEntries = [];
+        let nextUrl = `https://api.myanimelist.net/v2/users/@me/animelist?fields=list_status&limit=1000`;
+        while (nextUrl) {
+          const malRes = await fetch(nextUrl, { headers: { 'Authorization': `Bearer ${storage.malToken}` } });
+          const malData = await malRes.json();
+          if (malData.data) malEntries.push(...malData.data);
+          nextUrl = malData.paging?.next || null;
+        }
+
+        const alMap = new Map();
+        alEntries.forEach(e => { if (e.media?.idMal) alMap.set(e.media.idMal, e); });
+        
+        const malMap = new Map();
+        malEntries.forEach(e => malMap.set(e.node.id, e));
+
+        const syncQueue = []; 
+
+        alMap.forEach((alEntry, idMal) => {
+          const malEntry = malMap.get(idMal);
+          const alProg = alEntry.progress || 0;
+          const title = alEntry.media.title.english || alEntry.media.title.romaji;
+
+          if (!malEntry) {
+            syncQueue.push({ platform: 'MAL', id: idMal, progress: alProg, status: alEntry.status, title });
+          } else {
+            const malProg = malEntry.list_status.num_episodes_watched || 0;
+            if (alProg > malProg) {
+              syncQueue.push({ platform: 'MAL', id: idMal, progress: alProg, status: alEntry.status, title });
+            } else if (malProg > alProg) {
+              syncQueue.push({ platform: 'AL', id: alEntry.media.id, progress: malProg, status: malEntry.list_status.status, title });
+            }
+          }
+        });
+
+        malMap.forEach((malEntry, idMal) => {
+          if (!alMap.has(idMal)) {
+            syncQueue.push({ 
+              platform: 'AL_LOOKUP', idMal: idMal, 
+              progress: malEntry.list_status.num_episodes_watched, 
+              status: malEntry.list_status.status, 
+              title: malEntry.node.title 
+            });
+          }
+        });
+
+        if (syncQueue.length === 0) {
+          chrome.runtime.sendMessage({ action: "SYNC_COMPLETE", updatesMade: 0 }).catch(() => {});
+          return;
+        }
+
+        for(let i = 0; i < syncQueue.length; i++) {
+          const task = syncQueue[i];
+          chrome.runtime.sendMessage({ action: "SYNC_PROGRESS", current: i + 1, total: syncQueue.length, title: task.title }).catch(()=>{});
+
+          try {
+            if (task.platform === 'MAL') {
+              await safeMalApiRequest(
+                `anime/${task.id}/my_list_status`, 'PUT',
+                { status: task.status === 'CURRENT' ? 'watching' : task.status.toLowerCase(), num_watched_episodes: task.progress },
+                storage.malToken
+              );
+            } else if (task.platform === 'AL') {
+              let aniStatus = 'CURRENT';
+              if (task.status === 'completed') aniStatus = 'COMPLETED';
+              if (task.status === 'on_hold') aniStatus = 'PAUSED';
+              if (task.status === 'dropped') aniStatus = 'DROPPED';
+              if (task.status === 'plan_to_watch') aniStatus = 'PLANNING';
+
+              const saveMut = `mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) { SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status) { id } }`;
+              await apiRequest(saveMut, { mediaId: task.id, progress: task.progress, status: aniStatus }, storage.anilistToken);
+            } else if (task.platform === 'AL_LOOKUP') {
+              const findQuery = `query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { id } }`;
+              const findRes = await apiRequest(findQuery, { idMal: task.idMal }, storage.anilistToken);
+              await new Promise(resolve => setTimeout(resolve, 500)); 
+
+              if (findRes.data && findRes.data.Media) {
+                const anilistId = findRes.data.Media.id;
+                let aniStatus = 'CURRENT';
+                if (task.status === 'completed') aniStatus = 'COMPLETED';
+                if (task.status === 'on_hold') aniStatus = 'PAUSED';
+                if (task.status === 'dropped') aniStatus = 'DROPPED';
+                if (task.status === 'plan_to_watch') aniStatus = 'PLANNING';
+
+                const saveMut = `mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) { SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status) { id } }`;
+                await apiRequest(saveMut, { mediaId: anilistId, progress: task.progress, status: aniStatus }, storage.anilistToken);
+              }
+            }
+          } catch (e) { console.error(`Failed to sync ${task.title}:`, e); }
+
+          await new Promise(resolve => setTimeout(resolve, 1500)); 
+        }
+
+        chrome.runtime.sendMessage({ action: "SYNC_COMPLETE", updatesMade: syncQueue.length }).catch(() => {});
+      } catch (err) { console.error("Smart Merge Error:", err); }
+    })();
+    return true;
+  }
   return false; 
 });
 
@@ -676,7 +1098,6 @@ async function checkForNewEpisodes() {
   const storage = await chrome.storage.local.get(['anilistToken', 'anilistUserId', 'lastNotifiedEpisodes']);
   if (!storage.anilistToken || !storage.anilistUserId) return;
 
-  // Query AniList for shows the user is currently watching
   const query = `
     query ($userId: Int) {
       MediaListCollection(userId: $userId, type: ANIME, status: CURRENT) {
@@ -698,7 +1119,7 @@ async function checkForNewEpisodes() {
     if (lists.length === 0) return;
     
     const entries = lists[0].entries || [];
-    let lastNotified = storage.lastNotifiedEpisodes || {}; // Cache to prevent spamming notifications
+    let lastNotified = storage.lastNotifiedEpisodes || {};
     let newlyAired = [];
 
     const nowSeconds = Math.floor(Date.now() / 1000);
@@ -709,11 +1130,9 @@ async function checkForNewEpisodes() {
         const airTime = media.nextAiringEpisode.airingAt;
         const epNum = media.nextAiringEpisode.episode;
         
-        // Check if the episode aired in the past 2 hours
         if (nowSeconds >= airTime && (nowSeconds - airTime) < 7200) {
           const cacheKey = `${media.id}_${epNum}`;
           
-          // If we haven't already notified the user for this exact episode, queue it up!
           if (!lastNotified[cacheKey]) {
             newlyAired.push({ title: media.title.english || media.title.romaji, episode: epNum });
             lastNotified[cacheKey] = true;
@@ -722,14 +1141,13 @@ async function checkForNewEpisodes() {
       }
     });
 
-    // Fire the native desktop notifications
     if (newlyAired.length > 0) {
       await chrome.storage.local.set({ lastNotifiedEpisodes: lastNotified });
       
       newlyAired.forEach(anime => {
         chrome.notifications.create({
           type: 'basic',
-          iconUrl: 'icons/icon128.png', // Ensure this file exists in your icons folder!
+          iconUrl: 'icons/icon128.png',
           title: 'New Episode Available! 🍿',
           message: `Episode ${anime.episode} of ${anime.title} just finished airing in Japan.`
         });

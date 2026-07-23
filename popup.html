@@ -13,6 +13,7 @@
       <h1 class="login-title">AniList Update</h1>
       <p class="login-subtitle">Your quick anime tracking companion.</p>
       <button id="login-btn" class="primary-btn">Log In with AniList</button>
+      <button id="mal-login-btn" class="primary-btn" style="background-color: #2E51A2; margin-top: 10px;">Login with MyAnimeList</button>
     </div>
   </div>
 
@@ -60,6 +61,9 @@
       </div>
 
       <h3 class="autodetect-header">We noticed you're watching...</h3>
+      <!-- NEW: SYNC BADGES CONTAINER -->
+      <div id="autodetect-badges" style="display: flex; gap: 8px; justify-content: center; margin-bottom: 10px;"></div>
+
       <div class="autodetect-card">
         <img id="autodetect-img" src="" alt="Cover">
         <div class="autodetect-info">
@@ -118,8 +122,33 @@
         </div>
         <p style="font-size: 11px; opacity: 0.7; margin-top: 8px;">Backup your local settings, gamification streaks, and offline queues.</p>
       </div>
+      
+      <!-- Connected Accounts Section -->
+      <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #2b3a4a;">
+        <h4 style="margin-bottom: 10px; color: #fff;">Connected Accounts</h4>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button id="settings-anilist-link-btn" class="secondary-btn" style="border-color: #3db4f2; color: #3db4f2;">Link to AniList</button>
+          <button id="settings-mal-link-btn" class="secondary-btn" style="border-color: #2E51A2; color: #2E51A2;">Link to MyAnimeList</button>
+        </div>
+      </div>
 
-      <button id="logout-btn" class="secondary-btn" style="width: 100%; margin-top: 20px; border-color: #e06c75; color: #e06c75;">Log Out of AniList</button>
+      <!-- NEW: CROSS-SYNC SECTION -->
+      <div id="cross-sync-section" class="hidden" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #2b3a4a;">
+        <h4 style="margin-bottom: 10px; color: #E5C07B;">🔄 Cross-Sync Data</h4>
+        <p style="font-size: 11px; opacity: 0.7; margin-bottom: 10px;">Smart Merge: Shiinah will compare your lists and update both platforms to match your highest progress.</p>
+        
+        <button id="sync-shiinah-btn" class="primary-btn" style="width: 100%; background-color: #E5C07B; color: #0b1119; font-weight: bold;">
+          Sync to Shiinah
+        </button>
+        
+        <!-- PROGRESS BAR UI -->
+        <div id="sync-progress-container" class="hidden" style="margin-top: 12px; background: #0b1119; border-radius: 4px; height: 8px; overflow: hidden; border: 1px solid #1a2636;">
+          <div id="sync-progress-bar" style="height: 100%; width: 0%; background: #4cca51; transition: width 0.3s ease;"></div>
+        </div>
+        <div id="sync-status-text" style="font-size: 11px; color: #4cca51; margin-top: 6px; text-align: center; font-weight: bold;"></div>
+      </div>
+
+      <button id="logout-btn" class="secondary-btn" style="width: 100%; margin-top: 25px; border-color: #e06c75; color: #e06c75;">Disconnect All Accounts</button>
     </div>
 
     <!-- UPDATED: PROFILE VIEW (Now with Detailed Stats) -->

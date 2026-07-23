@@ -2,6 +2,7 @@
 // CORE LOGIC: Auth, API Routing, Anime List Rendering, and Auto-Detect
 
 const CLIENT_ID = ANILIST_CLIENT_ID; 
+const SECOND_CLIENT_ID = MAL_CLIENT_ID;
 let accessToken = null;
 let userId = null;
 let currentSelectedAnime = null; 
@@ -53,6 +54,92 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('login-btn').addEventListener('click', handleLoginClick);
   document.getElementById('logout-btn').addEventListener('click', handleLogoutClick);
   
+  // Attach MAL login to the main login screen button
+  const malLoginBtn = document.getElementById('mal-login-btn');
+  if (malLoginBtn) malLoginBtn.addEventListener('click', handleMalLoginClick);
+
+  // Attach auth flows to the Settings Menu link buttons
+  const settingsAniBtn = document.getElementById('settings-anilist-link-btn');
+  if (settingsAniBtn) settingsAniBtn.addEventListener('click', handleLoginClick);
+  
+  const settingsMalBtn = document.getElementById('settings-mal-link-btn');
+  if (settingsMalBtn) settingsMalBtn.addEventListener('click', handleMalLoginClick);
+  
+  // --- NEW: REACTIVE UI LISTENER ---
+  // This listens for the background script saving the token and updates the UI instantly
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local' && changes.malToken && changes.malToken.newValue) {
+      const btn = document.getElementById('settings-mal-link-btn');
+      if (btn) {
+        btn.textContent = "✓ MAL Connected";
+        btn.style.borderColor = "#4cca51";
+        btn.style.color = "#4cca51";
+        btn.disabled = true;
+      }
+    }
+  });
+
+// --- NEW: SMART MERGE LISTENER ---
+  const syncShiinahBtn = document.getElementById('sync-shiinah-btn');
+  if (syncShiinahBtn) {
+    syncShiinahBtn.addEventListener('click', () => {
+      const statusText = document.getElementById('sync-status-text');
+      const progressContainer = document.getElementById('sync-progress-container');
+      const progressBar = document.getElementById('sync-progress-bar');
+      
+      syncShiinahBtn.disabled = true;
+      syncShiinahBtn.style.opacity = '0.5';
+      if (progressContainer) progressContainer.classList.remove('hidden');
+      if (progressBar) progressBar.style.width = '0%';
+      if (statusText) {
+        statusText.style.color = '#3db4f2';
+        statusText.textContent = "Fetching and comparing libraries...";
+      }
+      
+      chrome.runtime.sendMessage({ action: "SYNC_SMART_MERGE" });
+    });
+  }
+
+  // Listen for Live Sync Progress
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.action === "SYNC_PROGRESS") {
+      const progressBar = document.getElementById('sync-progress-bar');
+      const statusText = document.getElementById('sync-status-text');
+      
+      if (progressBar) {
+        const pct = (message.current / message.total) * 100;
+        progressBar.style.width = `${pct}%`;
+      }
+      if (statusText) {
+        statusText.textContent = `Syncing: ${message.current} / ${message.total} (${message.title})`;
+      }
+    } else if (message.action === "SYNC_COMPLETE") {
+      const statusText = document.getElementById('sync-status-text');
+      const syncBtn = document.getElementById('sync-shiinah-btn');
+      
+      if (statusText) {
+        statusText.textContent = `✅ Sync Complete! ${message.updatesMade} updates made.`;
+        statusText.style.color = "#4cca51";
+      }
+      if (syncBtn) {
+        syncBtn.disabled = false;
+        syncBtn.style.opacity = '1';
+      }
+    }
+  });
+
+  const syncMalToAniBtn = document.getElementById('sync-mal-to-ani-btn');
+  if (syncMalToAniBtn) {
+    syncMalToAniBtn.addEventListener('click', () => {
+      const statusText = document.getElementById('sync-status-text');
+      syncMalToAniBtn.disabled = true;
+      syncMalToAniBtn.textContent = "Syncing...";
+      if (statusText) statusText.textContent = "Fetching lists & comparing data...";
+      
+      chrome.runtime.sendMessage({ action: "SYNC_MAL_TO_ANI" });
+    });
+  }
+
   document.getElementById('back-btn').addEventListener('click', () => {
     document.getElementById('detail-view').classList.add('hidden');
     document.getElementById('main-view').classList.remove('hidden');
@@ -269,6 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- SETTINGS NAVIGATION ---
+  // --- SETTINGS NAVIGATION ---
   const settingsBtn = document.getElementById('settings-btn');
   if (settingsBtn) {
     settingsBtn.addEventListener('click', () => {
@@ -277,16 +365,64 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('autodetect-view').classList.add('hidden');
       document.getElementById('settings-view').classList.remove('hidden');
       
-      chrome.storage.local.get(['trackingThreshold', 'whitelistedDomains'], (res) => {
+      // FETCH ALL SETTINGS AND TOKENS
+      chrome.storage.local.get(['trackingThreshold', 'whitelistedDomains', 'anilistToken', 'malToken'], (res) => {
+        // 1. Threshold Slider
         const threshold = res.trackingThreshold || 80;
         const slider = document.getElementById('threshold-slider');
         const display = document.getElementById('threshold-display');
-        
         if (slider && display) {
           slider.value = threshold;
           display.textContent = `${threshold}%`;
         }
+        
+        // 2. Whitelist Manager
         renderWhitelistManager(res.whitelistedDomains || []);
+
+        // 3. Connected Accounts UI
+        const aniLinkBtn = document.getElementById('settings-anilist-link-btn');
+        const malLinkBtn = document.getElementById('settings-mal-link-btn');
+        const syncSection = document.getElementById('cross-sync-section'); // NEW
+        
+        let hasAniList = false;
+        let hasMal = false;
+
+        if (aniLinkBtn) {
+          if (res.anilistToken) {
+            hasAniList = true;
+            aniLinkBtn.textContent = "✓ AniList Connected";
+            aniLinkBtn.style.borderColor = "#4cca51";
+            aniLinkBtn.style.color = "#4cca51";
+            aniLinkBtn.disabled = true; 
+          } else {
+            aniLinkBtn.textContent = "Link to AniList";
+            aniLinkBtn.style.borderColor = "#3db4f2";
+            aniLinkBtn.style.color = "#3db4f2";
+            aniLinkBtn.disabled = false;
+          }
+        }
+
+        if (malLinkBtn) {
+          if (res.malToken) {
+            hasMal = true;
+            malLinkBtn.textContent = "✓ MAL Connected";
+            malLinkBtn.style.borderColor = "#4cca51";
+            malLinkBtn.style.color = "#4cca51";
+            malLinkBtn.disabled = true; 
+          } else {
+            malLinkBtn.textContent = "Link to MyAnimeList";
+            malLinkBtn.style.borderColor = "#5C7CE5"; 
+            malLinkBtn.style.color = "#5C7CE5";
+            malLinkBtn.disabled = false;
+          }
+        }
+
+        // Unhide the Sync feature only if both are connected!
+        if (hasAniList && hasMal && syncSection) {
+          syncSection.classList.remove('hidden');
+        } else if (syncSection) {
+          syncSection.classList.add('hidden');
+        }
       });
     });
   }
@@ -378,22 +514,23 @@ document.addEventListener('DOMContentLoaded', () => {
 // 🔐 AUTHENTICATION LOGIC
 // ==========================================
 
-function handleLoginClick() {
-  const btn = document.getElementById('login-btn');
-  const originalText = btn.textContent;
-  btn.textContent = "Connecting...";
+function handleLoginClick(e) {
+  const btn = e ? e.currentTarget : document.getElementById('login-btn');
+  const originalText = btn ? btn.textContent : "Log In";
+  
+  if (btn) btn.textContent = "Connecting...";
 
-  const safeClientId = typeof ANILIST_CLIENT_ID !== 'undefined' ? ANILIST_CLIENT_ID : '45996';
+  const safeClientId = typeof CLIENT_ID !== 'undefined' ? CLIENT_ID : '45996';
   const authUrl = `https://anilist.co/api/v2/oauth/authorize?client_id=${safeClientId}&response_type=token`;
 
   chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (redirectUrlResult) => {
     if (chrome.runtime.lastError) {
-      btn.textContent = "Error - Check Console";
-      setTimeout(() => { btn.textContent = originalText; }, 3000);
+      if (btn) btn.textContent = "Error - Check Console";
+      setTimeout(() => { if (btn) btn.textContent = originalText; }, 3000);
       return;
     }
     if (!redirectUrlResult) {
-      btn.textContent = originalText;
+      if (btn) btn.textContent = originalText;
       return;
     }
     
@@ -405,17 +542,37 @@ function handleLoginClick() {
       chrome.storage.local.set({ anilistToken: accessToken }, () => {
         updateAuthUI(true);
         initializeApp();
-        btn.textContent = originalText; 
+        
+        if (btn && btn.id.includes('settings')) {
+          btn.textContent = "✓ AniList Connected";
+          btn.style.borderColor = "#4cca51";
+          btn.style.color = "#4cca51";
+        } else if (btn) {
+          btn.textContent = originalText; 
+        }
       });
     } else {
-      btn.textContent = "Failed to get token";
-      setTimeout(() => { btn.textContent = originalText; }, 3000);
+      if (btn) btn.textContent = "Failed to get token";
+      setTimeout(() => { if (btn) btn.textContent = originalText; }, 3000);
     }
   });
 }
 
+
+
+function handleMalLoginClick(e) {
+  const btn = e ? e.currentTarget : document.getElementById('settings-mal-link-btn');
+  if (btn) btn.textContent = "Check browser window...";
+
+  // Ping the background script to launch the persistent Auth Flow
+  chrome.runtime.sendMessage({ action: "LOGIN_MAL" });
+
+  // Note: The popup will close automatically when the auth window steals focus. 
+  // When you reopen the popup, it will read the newly saved token and show "✓ MAL Connected"!
+}
+
 function handleLogoutClick() {
-  chrome.storage.local.remove(['anilistToken', 'cachedList_data', 'cachedList_filter'], () => {
+  chrome.storage.local.remove(['anilistToken', 'malToken', 'malRefreshToken', 'cachedList_data', 'cachedList_filter'], () => {
     accessToken = null;
     userId = null;
     currentSelectedAnime = null;
@@ -457,6 +614,7 @@ function updateAuthUI(isLoggedIn) {
     if (detailView) detailView.classList.add('hidden');
   }
 }
+
 
 // ==========================================
 // 📡 API CORE & BOOTSTRAP
@@ -580,25 +738,63 @@ async function searchAnimeWithFallbacks(rawTitle, apiType) {
     return res.data?.Media || null;
   }
 
+  // 1. Try AniList First
   let media = await doSearch(rawTitle);
+  
+  if (!media) {
+    let noBrackets = rawTitle.replace(/\[.*?\]|\(.*?\)[^\w\s]*/g, '').trim();
+    if (noBrackets && noBrackets !== rawTitle) media = await doSearch(noBrackets);
+    
+    if (!media) {
+      let noPunctuation = noBrackets.replace(/[?!,]/g, '').replace(/\s+/g, ' ').trim();
+      if (noPunctuation && noPunctuation !== noBrackets) media = await doSearch(noPunctuation);
+      
+      if (!media) {
+        let splitTitle = rawTitle.split(/[:\-]/)[0].trim();
+        if (splitTitle && splitTitle !== rawTitle && splitTitle.length > 3) media = await doSearch(splitTitle);
+      }
+    }
+  }
+
   if (media) return media;
 
-  let noBrackets = rawTitle.replace(/\[.*?\]|\(.*?\)[^\w\s]*/g, '').trim();
-  if (noBrackets && noBrackets !== rawTitle) {
-    media = await doSearch(noBrackets);
-    if (media) return media;
-  }
+  // 2. NEW: Try MyAnimeList (MAL) Fallback
+  const storage = await chrome.storage.local.get(['malToken']);
+  if (storage.malToken) {
+    const endpoint = apiType === 'ANIME' ? 'anime' : 'manga';
+    
+    async function doMalSearch(term) {
+      try {
+        const res = await fetch(`https://api.myanimelist.net/v2/${endpoint}?q=${encodeURIComponent(term)}&limit=1&fields=id,title,alternative_titles,main_picture,status,num_episodes,num_chapters,my_list_status`, {
+          headers: { 'Authorization': `Bearer ${storage.malToken}` }
+        });
+        const data = await res.json();
+        
+        if (data && data.data && data.data.length > 0) {
+          const malNode = data.data[0].node;
+          // Format MAL data to perfectly mimic AniList structure for the UI
+          return {
+            id: malNode.id,
+            idMal: malNode.id,
+            isMalOnly: true, // Flag to identify this as a MAL-exclusive find
+            status: malNode.status ? malNode.status.toUpperCase() : "RELEASING",
+            title: { romaji: malNode.title, english: malNode.alternative_titles?.en || malNode.title },
+            coverImage: { large: malNode.main_picture?.large, medium: malNode.main_picture?.medium },
+            episodes: apiType === 'ANIME' ? (malNode.num_episodes || null) : null,
+            chapters: apiType === 'MANGA' ? (malNode.num_chapters || null) : null,
+            mediaListEntry: malNode.my_list_status ? {
+              progress: apiType === 'ANIME' ? malNode.my_list_status.num_episodes_watched : malNode.my_list_status.num_chapters_read,
+              status: 'CURRENT'
+            } : null
+          };
+        }
+      } catch(e) { console.error("MAL Fallback Search Failed", e); }
+      return null;
+    }
 
-  let noPunctuation = noBrackets.replace(/[?!,]/g, '').replace(/\s+/g, ' ').trim();
-  if (noPunctuation && noPunctuation !== noBrackets) {
-    media = await doSearch(noPunctuation);
-    if (media) return media;
-  }
-
-  let splitTitle = rawTitle.split(/[:\-]/)[0].trim();
-  if (splitTitle && splitTitle !== rawTitle && splitTitle.length > 3) {
-    media = await doSearch(splitTitle);
-    if (media) return media;
+    let malMedia = await doMalSearch(rawTitle);
+    if (!malMedia) malMedia = await doMalSearch(rawTitle.replace(/\[.*?\]|\(.*?\)[^\w\s]*/g, '').trim());
+    if (malMedia) return malMedia;
   }
 
   return null; 
@@ -721,6 +917,27 @@ function showAutoDetectView(media, progressNum, detectedType) {
   document.getElementById('main-view').classList.add('hidden');
   document.getElementById('search-input').classList.add('hidden'); 
   document.getElementById('autodetect-view').classList.remove('hidden');
+
+  // NEW: DYNAMIC SYNC BADGES
+  const badgesContainer = document.getElementById('autodetect-badges');
+  if (badgesContainer) {
+    badgesContainer.innerHTML = ''; // Clear previous
+    
+    // AniList Badge (Only if it came from AniList)
+    if (media.id > 0 && !media.isMalOnly) {
+      badgesContainer.innerHTML += `<span style="background: rgba(61,180,242,0.15); border: 1px solid #3db4f2; color: #3db4f2; padding: 2px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; text-transform: uppercase;">AL Sync</span>`;
+    }
+    
+    // MAL Badge (If it has a MAL ID from AniList, or if it was found exclusively on MAL)
+    if (media.idMal || media.isMalOnly) {
+       badgesContainer.innerHTML += `<span style="background: rgba(46,81,162,0.15); border: 1px solid #2E51A2; color: #5C7CE5; padding: 2px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; text-transform: uppercase;">MAL Sync</span>`;
+    }
+
+    // OTG Local Badge (If it's a negative ID custom manga)
+    if (media.id < 0) {
+      badgesContainer.innerHTML += `<span style="background: rgba(229,192,123,0.15); border: 1px solid #E5C07B; color: #E5C07B; padding: 2px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; text-transform: uppercase;">OTG Local</span>`;
+    }
+  }
   
   document.getElementById('autodetect-img').src = media.coverImage.medium;
   document.getElementById('autodetect-title').textContent = media.title.english || media.title.romaji;
@@ -1378,8 +1595,8 @@ async function loadUnfinishedList() {
   renderSkeleton(); 
 
   try {
-    // NEW: Also select custom_title from Supabase
-    const supabaseUrl = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&select=*,custom_title&order=updated_at.desc`;
+    // 1. Fetch from Supabase (now includes platform!)
+    const supabaseUrl = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&select=*,custom_title,platform&order=updated_at.desc`;
     const res = await fetch(supabaseUrl, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
     const otgSaves = await res.json();
 
@@ -1388,33 +1605,59 @@ async function loadUnfinishedList() {
       return;
     }
 
-    // 1. Separate valid AniList IDs (Positive) from Custom IDs (Negative)
-    const validAniListIds = [...new Set(otgSaves.map(save => save.media_id).filter(id => id > 0))];
+    // 2. Separate by Platform
+    const aniListIds = [...new Set(otgSaves.filter(s => s.platform === 'ANILIST' || !s.platform).map(s => s.media_id).filter(id => id > 0))];
+    const malIds = [...new Set(otgSaves.filter(s => s.platform === 'MAL').map(s => s.media_id))];
+    
     let fetchedMedia = [];
 
-    // 2. Only query AniList if we actually have valid IDs to ask about
-    if (validAniListIds.length > 0) {
+    // 3. Fetch from AniList
+    if (aniListIds.length > 0) {
       const query = `query ($idIn: [Int]) { Page(page: 1, perPage: 50) { media(id_in: $idIn, type: ${currentMode}) { id title { romaji english } coverImage { medium large } episodes chapters mediaListEntry { progress status score } } } }`;
-      const aniRes = await apiRequest(query, { idIn: validAniListIds });
-      fetchedMedia = aniRes.data?.Page?.media || [];
+      const aniRes = await apiRequest(query, { idIn: aniListIds });
+      if (aniRes.data?.Page?.media) fetchedMedia.push(...aniRes.data.Page.media.map(m => ({ ...m, platform: 'ANILIST' })));
     }
 
-    // 3. Rebuild the list, creating "Mock" media objects for the Custom ones
+    // 4. Fetch from MAL
+    const storage = await chrome.storage.local.get(['malToken']);
+    if (malIds.length > 0 && storage.malToken) {
+      for (const mId of malIds) {
+        try {
+          const endpoint = currentMode === 'ANIME' ? 'anime' : 'manga';
+          const malRes = await fetch(`https://api.myanimelist.net/v2/${endpoint}/${mId}?fields=id,title,alternative_titles,main_picture,status,num_episodes,num_chapters,my_list_status`, {
+            headers: { 'Authorization': `Bearer ${storage.malToken}` }
+          });
+          const malNode = await malRes.json();
+          if (malNode && malNode.id) {
+            fetchedMedia.push({
+              id: malNode.id,
+              platform: 'MAL',
+              title: { romaji: malNode.title, english: malNode.alternative_titles?.en || malNode.title },
+              coverImage: { medium: malNode.main_picture?.medium, large: malNode.main_picture?.large },
+              episodes: currentMode === 'ANIME' ? malNode.num_episodes : null,
+              chapters: currentMode === 'MANGA' ? malNode.num_chapters : null,
+              mediaListEntry: malNode.my_list_status ? { progress: currentMode === 'ANIME' ? malNode.my_list_status.num_episodes_watched : malNode.my_list_status.num_chapters_read, status: 'CURRENT' } : null
+            });
+          }
+        } catch(e) {}
+      }
+    }
+
+    // 5. Merge Data
     const mergedList = otgSaves.map(save => {
-      if (save.media_id < 0) {
-        // Construct a Mock Media Object for non-AniList manga
+      if (save.platform === 'CUSTOM' || save.media_id < 0) {
         return {
           ...save,
           media: {
             id: save.media_id,
             title: { romaji: save.custom_title || 'Unknown Title', english: null },
-            coverImage: { medium: 'icons/icon48.png', large: 'icons/icon128.png' }, // Use extension icon as placeholder
+            coverImage: { medium: 'icons/icon48.png', large: 'icons/icon128.png' },
             chapters: '?',
             mediaListEntry: { progress: 0, status: 'CURRENT', score: 0 }
           }
         };
       } else {
-        const mediaMatch = fetchedMedia.find(m => m.id === save.media_id);
+        const mediaMatch = fetchedMedia.find(m => m.id === save.media_id && m.platform === (save.platform || 'ANILIST'));
         return { ...save, media: mediaMatch || null };
       }
     }).filter(item => item.media !== null); 
