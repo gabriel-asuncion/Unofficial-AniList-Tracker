@@ -69,13 +69,19 @@ async function processOfflineQueue() {
 // ==========================================
 
 async function apiRequest(query, variables, token) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  };
+  
+  // FIX: Only attach the Bearer token if it is valid!
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch('https://graphql.anilist.co', {
     method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + token,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
+    headers: headers,
     body: JSON.stringify({ query, variables })
   });
   return response.json();
@@ -688,6 +694,126 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true }); 
     return false; 
   } 
+  // --- INLINE TRACKING: WATCHLIST PROVIDER ---
+  else if (message.action === "GET_USER_WATCHLIST") {
+    chrome.storage.local.get(['cachedList_data'], (res) => {
+      sendResponse({ watchlist: res.cachedList_data || [] });
+    });
+    return true; // Keeps channel open for async response
+  }
+
+  // --- INLINE TRACKING: DUAL-PLATFORM STATS FETCHER ---
+  else if (message.action === "FETCH_MEDIA_STATS") {
+    const cacheKey = `stats_${message.mediaId}`;
+    
+    chrome.storage.local.get(['anilistToken', cacheKey], async (res) => {
+      // Return cached data (Wrap in { stats: ... } to match content.js expectations)
+      if (res[cacheKey] && (Date.now() - res[cacheKey].timestamp < 86400000)) {
+        sendResponse({ stats: res[cacheKey].data }); 
+        return;
+      }
+
+      let stats = { al: null, mal: null };
+
+      // 1. Fetch AniList Stats
+      if (res.anilistToken) {
+        const alQuery = `query($id: Int) { Media(id: $id) { stats { scoreDistribution { score amount } } } }`;
+        try {
+          const alRes = await apiRequest(alQuery, { id: message.mediaId }, res.anilistToken);
+          stats.al = alRes.data?.Media?.stats || null;
+        } catch (e) {}
+      }
+
+      // 2. Fetch MAL Stats via Jikan API
+      if (message.malId) {
+        try {
+          const jikanRes = await fetch(`https://api.jikan.moe/v4/anime/${message.malId}/statistics`);
+          if (jikanRes.ok) {
+            const jikanData = await jikanRes.json();
+            if (jikanData?.data?.scores) {
+              const malScores = jikanData.data.scores.map(s => ({
+                score: s.score * 10,
+                amount: s.votes
+              }));
+              stats.mal = { scoreDistribution: malScores };
+            }
+          }
+        } catch (e) {
+          console.log("[Shiinah] Jikan API Error:", e);
+        }
+      }
+
+      chrome.storage.local.set({ [cacheKey]: { timestamp: Date.now(), data: stats } });
+      
+      // FIX: Wrap the response in { stats: ... }
+      sendResponse({ stats: stats }); 
+    });
+    return true; 
+  }
+
+  // --- INLINE TRACKING: SEARCH & FETCH FOR UNLISTED SHOWS ---
+  else if (message.action === "SEARCH_AND_FETCH_STATS") {
+    chrome.storage.local.get(['anilistToken', 'malToken'], async (res) => {
+      try {
+        const searchQuery = `query ($search: String) { Media (search: $search, type: ANIME, sort: SEARCH_MATCH) { id idMal title { romaji english } } }`;
+        
+        // FIX: Pass res.anilistToken to prevent the Bearer undefined crash!
+        const searchRes = await apiRequest(searchQuery, { search: message.title }, res.anilistToken);
+        const media = searchRes.data?.Media;
+
+        if (!media) {
+          sendResponse({ error: "Not found" });
+          return;
+        }
+
+        let stats = { al: null, mal: null };
+
+        // Fetch AL Stats using the found ID
+        if (res.anilistToken) {
+          const alQuery = `query($id: Int) { Media(id: $id) { stats { scoreDistribution { score amount } } } }`;
+          try {
+            const alRes = await apiRequest(alQuery, { id: media.id }, res.anilistToken);
+            stats.al = alRes.data?.Media?.stats || null;
+          } catch (e) {}
+        }
+
+        // Fetch MAL Stats using the found MAL ID
+        if (media.idMal) {
+          try {
+            const jikanRes = await fetch(`https://api.jikan.moe/v4/anime/${media.idMal}/statistics`);
+            if (jikanRes.ok) {
+              const jikanData = await jikanRes.json();
+              if (jikanData?.data?.scores) {
+                const malScores = jikanData.data.scores.map(s => ({ score: s.score * 10, amount: s.votes }));
+                stats.mal = { scoreDistribution: malScores };
+              }
+            }
+          } catch (e) { console.log("[Shiinah] Jikan Error:", e); }
+        }
+
+        // Properly formatted response payload
+        sendResponse({ stats: stats, media: media });
+      } catch (e) {
+        sendResponse({ error: e.message });
+      }
+    });
+    return true; 
+  }
+
+  // --- INLINE TRACKING: QUICK ADD TO WATCHLIST ---
+  else if (message.action === "ADD_TO_WATCHLIST") {
+    chrome.storage.local.get(['anilistToken'], async (res) => {
+      if (!res.anilistToken) return sendResponse({ success: false });
+      const mutation = `mutation ($mediaId: Int, $status: MediaListStatus) { SaveMediaListEntry (mediaId: $mediaId, status: $status) { id } }`;
+      try {
+        await apiRequest(mutation, { mediaId: message.mediaId, status: 'CURRENT' }, res.anilistToken);
+        sendResponse({ success: true });
+      } catch (e) {
+        sendResponse({ success: false });
+      }
+    });
+    return true;
+  }
   
   // LIVE ANIME PROGRESS & ANISKIP FETCHER
   else if (message.action === "LIVE_VIDEO_PROGRESS") {

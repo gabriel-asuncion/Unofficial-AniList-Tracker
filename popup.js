@@ -1289,10 +1289,10 @@ async function loadAnimeList(silent = false) {
     const apiStatus = (filter === 'SCHEDULE' && currentMode === 'ANIME') ? 'CURRENT' : filter;
     const apiType = currentMode; // 'ANIME' or 'MANGA'
     
-    // Dynamically request chapters vs episodes based on mode
+    // Dynamically request chapters vs episodes based on mode, NOW INCLUDING idMal
     const mediaFields = currentMode === 'ANIME' 
-      ? `id status title { romaji english } coverImage { medium large } episodes nextAiringEpisode { airingAt timeUntilAiring episode }`
-      : `id status title { romaji english } coverImage { medium large } chapters`;
+      ? `id idMal status title { romaji english } coverImage { medium large } episodes nextAiringEpisode { airingAt timeUntilAiring episode }`
+      : `id idMal status title { romaji english } coverImage { medium large } chapters`;
 
     // Sort by UPDATED_TIME_DESC so recently read manga stack at the top!
     query = `

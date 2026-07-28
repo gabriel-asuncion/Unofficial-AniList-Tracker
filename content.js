@@ -831,4 +831,385 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       });
     });
   }
+
+  // ==========================================
+  // 🏷️ SMART CARD-BASED DOM SCANNER & TOOLTIP
+  // ==========================================
+
+  // Base64 Encoded Animated SVGs
+  const SVG_UNLISTED = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>svg { overflow: visible; }@keyframes kf_pulse_1_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_1_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_1 { transform-origin: 0 0; animation: kf_pulse_1_transform_0 2s linear infinite, kf_pulse_1_stroke_0 2s linear infinite;}@keyframes kf_pulse_2_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  10% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  30% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_2_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_2 { transform-origin: 0 0; animation: kf_pulse_2_transform_0 2s linear infinite, kf_pulse_2_stroke_0 2s linear infinite;}@keyframes kf_pulse_3_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  40% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_3_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  40% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_3 { transform-origin: 0 0; animation: kf_pulse_3_transform_0 2s linear infinite, kf_pulse_3_stroke_0 2s linear infinite;}</style><g id="watchlist_no"><circle id="pulse_1" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_2" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_3" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="bg" cx="12" cy="12" r="12" fill="#FFD345"/><path id="i" transform="translate(9 4)" d="M3.648 3.744C2.976 3.744 2.472 3.592 2.136 3.288C1.8 2.968 1.632 2.528 1.632 1.968C1.632 1.408 1.848 0.944 2.28 0.576C2.728 0.192 3.28 0 3.936 0C4.528 0 5.008 0.144 5.376 0.432C5.744 0.72 5.928 1.128 5.928 1.656C5.928 2.296 5.72 2.808 5.304 3.192C4.888 3.56 4.336 3.744 3.648 3.744ZM1.344 16.632C0.832 16.632 0.48 16.528 0.288 16.32C0.096 16.112 0 15.784 0 15.336C0 15.208 0.016 14.984 0.048 14.664C0.304 11.736 0.728 9.072 1.32 6.672C1.448 6.176 1.656 5.832 1.944 5.64C2.248 5.432 2.728 5.328 3.384 5.328C4.072 5.328 4.416 5.608 4.416 6.168C4.416 6.248 4.4 6.4 4.368 6.624C3.648 10.048 3.216 12.92 3.072 15.24C3.04 15.752 2.888 16.112 2.616 16.32C2.344 16.528 1.92 16.632 1.344 16.632Z" fill="white"/></g></svg>`)}`;
+  const SVG_YES = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>svg { overflow: visible; }@keyframes kf_pulse_1_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_1_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  10% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: rgba(76, 202, 81, 1); }  20% { stroke: rgba(76, 202, 81, 0); }  100% { stroke: rgba(76, 202, 81, 0); }}#pulse_1 { transform-origin: 0 0; animation: kf_pulse_1_transform_0 2s linear infinite, kf_pulse_1_stroke_0 2s linear infinite;}@keyframes kf_pulse_2_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  10% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  30% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_2_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #24A8DB; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  30% { stroke: rgba(76, 202, 81, 0); }  100% { stroke: rgba(76, 202, 81, 0); }}#pulse_2 { transform-origin: 0 0; animation: kf_pulse_2_transform_0 2s linear infinite, kf_pulse_2_stroke_0 2s linear infinite;}@keyframes kf_pulse_3_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  40% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_3_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #24A8DB; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  30% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  40% { stroke: rgba(76, 202, 81, 0); }  100% { stroke: rgba(76, 202, 81, 0); }}#pulse_3 { transform-origin: 0 0; animation: kf_pulse_3_transform_0 2s linear infinite, kf_pulse_3_stroke_0 2s linear infinite;}</style><g id="uptodate_yes"><circle id="pulse_1" cx="12" cy="12" r="11.5" stroke="#4CCA51"/><circle id="pulse_2" cx="12" cy="12" r="11.5" stroke="#24A8DB"/><circle id="pulse_3" cx="12" cy="12" r="11.5" stroke="#24A8DB"/><circle id="bg" cx="12" cy="12" r="12" fill="#4CCA51"/><path id="i" transform="translate(9 4)" d="M3.648 3.744C2.976 3.744 2.472 3.592 2.136 3.288C1.8 2.968 1.632 2.528 1.632 1.968C1.632 1.408 1.848 0.944 2.28 0.576C2.728 0.192 3.28 0 3.936 0C4.528 0 5.008 0.144 5.376 0.432C5.744 0.72 5.928 1.128 5.928 1.656C5.928 2.296 5.72 2.808 5.304 3.192C4.888 3.56 4.336 3.744 3.648 3.744ZM1.344 16.632C0.832 16.632 0.48 16.528 0.288 16.32C0.096 16.112 0 15.784 0 15.336C0 15.208 0.016 14.984 0.048 14.664C0.304 11.736 0.728 9.072 1.32 6.672C1.448 6.176 1.656 5.832 1.944 5.64C2.248 5.432 2.728 5.328 3.384 5.328C4.072 5.328 4.416 5.608 4.416 6.168C4.416 6.248 4.4 6.4 4.368 6.624C3.648 10.048 3.216 12.92 3.072 15.24C3.04 15.752 2.888 16.112 2.616 16.32C2.344 16.528 1.92 16.632 1.344 16.632Z" fill="white"/></g></svg>`)}`;
+  const SVG_NO = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>svg { overflow: visible; }@keyframes kf_pulse_1_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_1_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #E74C3C; }  10% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #E74C3C; }  20% { stroke: rgba(231, 76, 60, 0); }  100% { stroke: rgba(231, 76, 60, 0); }}#pulse_1 { transform-origin: 0 0; animation: kf_pulse_1_transform_0 2s linear infinite, kf_pulse_1_stroke_0 2s linear infinite;}@keyframes kf_pulse_2_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  10% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  30% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_2_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #24A8DB; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #E74C3C; }  30% { stroke: rgba(231, 76, 60, 0); }  100% { stroke: rgba(231, 76, 60, 0); }}#pulse_2 { transform-origin: 0 0; animation: kf_pulse_2_transform_0 2s linear infinite, kf_pulse_2_stroke_0 2s linear infinite;}@keyframes kf_pulse_3_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  40% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_3_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #24A8DB; }  30% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #E74C3C; }  40% { stroke: rgba(231, 76, 60, 0); }  100% { stroke: rgba(231, 76, 60, 0); }}#pulse_3 { transform-origin: 0 0; animation: kf_pulse_3_transform_0 2s linear infinite, kf_pulse_3_stroke_0 2s linear infinite;}</style><g id="uptodate_no"><circle id="pulse_1" cx="12" cy="12" r="11.5" stroke="#E74C3C"/><circle id="pulse_2" cx="12" cy="12" r="11.5" stroke="#24A8DB"/><circle id="pulse_3" cx="12" cy="12" r="11.5" stroke="#24A8DB"/><circle id="bg" cx="12" cy="12" r="12" fill="#E74C3C"/><path id="i" transform="translate(9 4)" d="M3.648 3.744C2.976 3.744 2.472 3.592 2.136 3.288C1.8 2.968 1.632 2.528 1.632 1.968C1.632 1.408 1.848 0.944 2.28 0.576C2.728 0.192 3.28 0 3.936 0C4.528 0 5.008 0.144 5.376 0.432C5.744 0.72 5.928 1.128 5.928 1.656C5.928 2.296 5.72 2.808 5.304 3.192C4.888 3.56 4.336 3.744 3.648 3.744ZM1.344 16.632C0.832 16.632 0.48 16.528 0.288 16.32C0.096 16.112 0 15.784 0 15.336C0 15.208 0.016 14.984 0.048 14.664C0.304 11.736 0.728 9.072 1.32 6.672C1.448 6.176 1.656 5.832 1.944 5.64C2.248 5.432 2.728 5.328 3.384 5.328C4.072 5.328 4.416 5.608 4.416 6.168C4.416 6.248 4.4 6.4 4.368 6.624C3.648 10.048 3.216 12.92 3.072 15.24C3.04 15.752 2.888 16.112 2.616 16.32C2.344 16.528 1.92 16.632 1.344 16.632Z" fill="white"/></g></svg>`)}`;
+
+  // Strict normalizer removes non-alphanumeric characters & trailing dots/ellipses
+  function normalizeTitle(title) {
+    if (!title) return "";
+    return title
+      .toLowerCase()
+      .replace(/\.{2,}/g, '') // Remove dots/ellipses
+      .replace(/[^\w\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Exact UI words to exclude from title tagging
+  const IGNORE_UI_WORDS = new Set([
+    'schedule', 'latest', 'popular', 'shows', 'trending', 'this season', 'season',
+    'ona', 'tv', 'movie', 'episodes', 'recently', 'released', 'home', 'browse',
+    'music', 'torrents', 'profile', 'settings', 'account', 'login', 'sub', 'dub',
+    'aud', 'read more', 'all', 'view', 'score distribution', 'current progress',
+    'al stats', 'mal stats', 'next', 'previous', 'today', 'mon', 'tue', 'wed',
+    'thu', 'fri', 'sat', 'sun'
+  ]);
+
+  function isGenericUIText(normText) {
+    if (!normText || normText.length < 3) return true;
+    return IGNORE_UI_WORDS.has(normText);
+  }
+
+  function isTitleMatch(normRaw, normTarget) {
+    if (!normRaw || !normTarget) return false;
+    if (normRaw === normTarget) return true;
+    // Handle truncated on-screen titles (e.g., "The Forsaken..." matching "The Forsaken Saintess...")
+    if (normRaw.length >= 4 && normTarget.startsWith(normRaw)) return true;
+    if (normTarget.length >= 4 && normRaw.startsWith(normTarget)) return true;
+    return false;
+  }
+
+  function processAnimeCard(card, watchlist) {
+    if (card.hasAttribute('data-shiinah-scanned')) return;
+    
+    // Prevent processing giant layout containers that happen to share class names
+    if (card.offsetWidth > window.innerWidth * 0.8 || card.offsetHeight > 800) return;
+
+    // 1. SMART TITLE EXTRACTION: Prioritize specific classes known to hold titles (e.g. line-clamp used in Anime Nexus)
+    let titleEl = card.querySelector('.line-clamp-1, .line-clamp-2, a.font-semibold, h1, h2, h3, h4, h5, .title, .series-title, .anime-title');
+    
+    // Fallback: the first link inside the card that looks like a series link
+    if (!titleEl && card.tagName !== 'A') {
+       titleEl = card.querySelector('a[href*="/anime/"], a[href*="/series/"]');
+    }
+    
+    // Fallback: If the card IS the link, use the card itself
+    if (!titleEl && card.tagName === 'A') {
+       titleEl = card;
+    }
+
+    let rawText = titleEl ? titleEl.innerText.trim() : '';
+
+    // Check image ALT as a backup (crucial for 1Anime!)
+    const imgEl = card.querySelector('img');
+    const altText = imgEl ? (imgEl.getAttribute('alt') || '').trim() : '';
+
+    // Clean up text
+    const normRawText = normalizeTitle(rawText);
+    const normAltText = normalizeTitle(altText);
+
+    // If we couldn't find ANY text, stop.
+    if (normRawText.length < 3 && normAltText.length < 3) return;
+
+    // Ensure we aren't tagging generic UI (like "Latest Episodes")
+    if (isGenericUIText(normRawText) || isGenericUIText(normAltText)) return;
+
+    // Mark as scanned
+    card.setAttribute('data-shiinah-scanned', 'true');
+
+    // Best display text (usually the longer, uncut alt text)
+    const displayTitle = (rawText.length > altText.length ? rawText : altText) || rawText;
+
+    // Match against Watchlist
+    const match = watchlist.find(entry => {
+      const normEng = normalizeTitle(entry.media?.title?.english);
+      const normRom = normalizeTitle(entry.media?.title?.romaji);
+      return isTitleMatch(normRawText, normEng) || isTitleMatch(normRawText, normRom) ||
+             isTitleMatch(normAltText, normEng) || isTitleMatch(normAltText, normRom);
+    });
+
+    // Prepare card for absolute badge injection
+    const style = window.getComputedStyle(card);
+    if (style.position === 'static') card.style.position = 'relative';
+
+    if (match) {
+      injectInteractiveBadge(card, match, true, displayTitle);
+    } else {
+      injectInteractiveBadge(card, { media: { title: { romaji: displayTitle } } }, false, displayTitle);
+    }
+  }
+
+  function injectInteractiveBadge(targetEl, entry, isWatchlisted, rawText) {
+    const media = entry.media;
+    const currentProgress = entry.progress || 0;
+    
+    let latestEp = media.episodes || media.chapters || '?';
+    if (media.nextAiringEpisode) {
+      latestEp = media.nextAiringEpisode.episode - 1;
+    }
+
+    const isUpToDate = latestEp !== '?' && currentProgress >= latestEp;
+    
+    let activeSvg, themeColor;
+    if (!isWatchlisted) {
+      activeSvg = SVG_UNLISTED;
+      themeColor = '#FFD345';
+    } else if (isUpToDate) {
+      activeSvg = SVG_YES;
+      themeColor = '#4cca51';
+    } else {
+      activeSvg = SVG_NO;
+      themeColor = '#e74c3c';
+    }
+
+    // 1. Badge Wrapper
+    const badgeWrapper = document.createElement('span');
+    badgeWrapper.className = 'shiinah-inline-badge';
+    Object.assign(badgeWrapper.style, {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'absolute', // Absolute positioning puts it neatly over the card!
+      top: '8px',
+      right: '8px',
+      cursor: 'pointer',
+      zIndex: '2147483640',
+      flexShrink: '0'
+    });
+
+    badgeWrapper.innerHTML = `<img src="${activeSvg}" style="width: 22px; height: 22px; pointer-events: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));">`;
+    targetEl.appendChild(badgeWrapper);
+
+    // 2. Body-Level Tooltip
+    const tooltip = document.createElement('div');
+    tooltip.className = 'shiinah-tooltip-container'; // Added for memory cleanup
+    tooltip._linkedBadge = badgeWrapper; // Links this tooltip to its specific badge
+    
+    Object.assign(tooltip.style, {
+      position: 'absolute',
+      width: '290px',
+      padding: '16px',
+      backgroundColor: '#0b1119',
+      border: `1px solid ${themeColor}`,
+      borderRadius: '12px',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.9)',
+      display: 'none',
+      flexDirection: 'column',
+      gap: '12px',
+      zIndex: '2147483647',
+      pointerEvents: 'auto',
+      fontFamily: 'system-ui, sans-serif',
+      color: '#fff',
+      cursor: 'default' 
+    });
+
+    const bridge = document.createElement('div');
+    bridge.style.cssText = 'position: absolute; bottom: -15px; left: 0; width: 100%; height: 15px; background: transparent;';
+    tooltip.appendChild(bridge);
+
+    // Stop click events ONLY on the badge wrapper so site links don't trigger
+    badgeWrapper.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    const headerHtml = isWatchlisted 
+      ? `
+        <div style="font-size: 11px; color: #9fadbd; font-weight: bold; text-align: center; letter-spacing: 0.5px; margin-bottom: 4px;">CURRENT PROGRESS</div>
+        <div style="font-size: 22px; color: #fff; font-weight: 900; text-align: center; letter-spacing: 1px; margin-bottom: 8px;">
+          <span style="color: ${themeColor};">${currentProgress}</span> / <span style="color: #677b94;">${latestEp}</span>
+        </div>
+      ` 
+      : `
+        <div style="font-size: 11px; color: #9fadbd; font-weight: bold; text-align: center; letter-spacing: 0.5px;">STATUS</div>
+        <div style="font-size: 16px; color: #FFD345; font-weight: bold; text-align: center; margin-bottom: 8px;">Not in Watchlist</div>
+        <button class="shiinah-add-btn" style="display: none; margin-bottom: 8px; background: #3db4f2; color: #fff; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; transition: 0.2s;">+ Add to AniList</button>
+      `;
+
+    tooltip.innerHTML = `
+      <div class="shiinah-status-header">${headerHtml}</div>
+      <div class="shiinah-switcher-bar" style="display: flex; gap: 6px; justify-content: center; border-bottom: 1px solid #1a2636; padding-bottom: 8px;">
+        <button class="shiinah-stat-tab active-tab" data-platform="al" style="background: #3db4f2; color: #0b1119; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">AL Stats</button>
+        <button class="shiinah-stat-tab" data-platform="mal" style="background: #1a2636; color: #9fadbd; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">MAL Stats</button>
+      </div>
+      <div class="shiinah-stats-body"><div style="text-align: center; color: #677b94; font-size: 12px; padding: 15px;">Loading distribution...</div></div>
+    `;
+
+    document.body.appendChild(tooltip);
+
+    let cachedStats = null;
+    let currentPlatform = 'al';
+
+    function renderChart(platformKey) {
+      const statsBody = tooltip.querySelector('.shiinah-stats-body');
+      const activeData = cachedStats ? cachedStats[platformKey] : null;
+      
+      if (!activeData || !activeData.scoreDistribution || activeData.scoreDistribution.length === 0) {
+        statsBody.innerHTML = `<div style="text-align: center; color: #e74c3c; font-size: 12px; padding: 15px;">No ${platformKey.toUpperCase()} data available</div>`;
+        return;
+      }
+
+      const scores = activeData.scoreDistribution;
+      const maxAmount = Math.max(...scores.map(s => s.amount));
+      let barsHtml = '';
+      const colorScale = ['#e74c3c', '#e67e22', '#f39c12', '#f1c40f', '#E5C07B', '#a8d052', '#86d655', '#64dd57', '#4cca51', '#2ecc71'];
+
+      scores.forEach((scoreObj) => {
+        const heightPct = maxAmount > 0 ? Math.max((scoreObj.amount / maxAmount) * 100, 6) : 6;
+        const barColor = colorScale[Math.min(Math.floor((scoreObj.score - 10) / 10), 9)] || '#4cca51';
+        
+        barsHtml += `
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; min-width: 18px;">
+            <div style="font-size: 8px; color: #9fadbd; height: 14px; display: flex; align-items: flex-end;">${scoreObj.amount > 999 ? (scoreObj.amount/1000).toFixed(1)+'k' : scoreObj.amount}</div>
+            <div style="width: 10px; height: 55px; display: flex; align-items: flex-end; justify-content: center;">
+              <div style="width: 100%; height: ${heightPct}%; background-color: ${barColor}; border-radius: 3px;"></div>
+            </div>
+            <div style="font-size: 9px; color: #677b94; font-weight: bold; margin-top: 2px;">${scoreObj.score}</div>
+          </div>
+        `;
+      });
+
+      statsBody.innerHTML = `
+        <div style="font-size: 11px; color: #9fadbd; font-weight: bold; margin-bottom: 6px; text-transform: uppercase;">SCORE DISTRIBUTION (${platformKey.toUpperCase()})</div>
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; height: 80px; border-bottom: 1px solid #2b3a4a; padding-bottom: 2px;">
+          ${barsHtml}
+        </div>
+      `;
+    }
+
+    tooltip.querySelectorAll('.shiinah-stat-tab').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        tooltip.querySelectorAll('.shiinah-stat-tab').forEach(b => {
+          b.style.background = '#1a2636';
+          b.style.color = '#9fadbd';
+        });
+        btn.style.background = btn.getAttribute('data-platform') === 'al' ? '#3db4f2' : '#2E51A2'; 
+        btn.style.color = '#fff';
+        currentPlatform = btn.getAttribute('data-platform');
+        renderChart(currentPlatform);
+      });
+    });
+
+    let hideTimeout;
+    let fetchIntentTimeout;
+
+    const showTooltip = () => {
+      clearTimeout(hideTimeout);
+      tooltip.style.display = 'flex';
+      
+      const rect = badgeWrapper.getBoundingClientRect();
+      let top = rect.top + window.scrollY - tooltip.offsetHeight - 15;
+      let left = rect.left + window.scrollX + (rect.width / 2) - (tooltip.offsetWidth / 2);
+
+      if (left < 10) left = 10;
+      if (left + tooltip.offsetWidth > window.innerWidth - 10) left = window.innerWidth - tooltip.offsetWidth - 10;
+      if (top < window.scrollY) top = rect.bottom + window.scrollY + 15; 
+
+      tooltip.style.top = `${top}px`;
+      tooltip.style.left = `${left}px`;
+
+      if (!cachedStats) {
+        clearTimeout(fetchIntentTimeout);
+        fetchIntentTimeout = setTimeout(() => {
+          try {
+            if (!chrome.runtime?.id) return;
+            
+            const actionName = isWatchlisted ? "FETCH_MEDIA_STATS" : "SEARCH_AND_FETCH_STATS";
+            const payload = isWatchlisted 
+              ? { action: actionName, mediaId: media.id, malId: media.idMal }
+              : { action: actionName, title: rawText };
+
+            chrome.runtime.sendMessage(payload, (res) => {
+              cachedStats = res?.stats || { al: null, mal: null };
+              renderChart(currentPlatform);
+
+              if (!isWatchlisted && res?.media?.id) {
+                const addBtn = tooltip.querySelector('.shiinah-add-btn');
+                if (addBtn) {
+                  addBtn.style.display = 'block';
+                  addBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    addBtn.textContent = 'Adding...';
+                    chrome.runtime.sendMessage({ action: "ADD_TO_WATCHLIST", mediaId: res.media.id }, (addRes) => {
+                      if (addRes?.success) {
+                        addBtn.textContent = 'Added! ✓';
+                        addBtn.style.background = '#4cca51';
+                      } else {
+                        addBtn.textContent = 'Error';
+                        addBtn.style.background = '#e74c3c';
+                      }
+                    });
+                  });
+                }
+              }
+            });
+          } catch(e) {
+            console.log("[Shiinah] Fetch Intent Error:", e);
+          }
+        }, 300); 
+      }
+    };
+
+    const scheduleHide = () => {
+      clearTimeout(fetchIntentTimeout);
+      hideTimeout = setTimeout(() => {
+        tooltip.style.display = 'none';
+      }, 250); 
+    };
+
+    badgeWrapper.addEventListener('mouseenter', showTooltip);
+    badgeWrapper.addEventListener('mouseleave', scheduleHide);
+    tooltip.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
+    tooltip.addEventListener('mouseleave', scheduleHide);
+  }
+
+  // ==========================================
+  // 🔄 SMART INTERVAL ENGINE & ORPHAN CLEANUP
+  // ==========================================
+  
+  let shiinahScannerInterval = null;
+  let cachedWatchlist = [];
+
+  function initSmartTracker() {
+    if (!chrome || !chrome.runtime || !chrome.runtime.id) return;
+
+    chrome.runtime.sendMessage({ action: "GET_USER_WATCHLIST" }, (response) => {
+      if (chrome.runtime.lastError || !response || !response.watchlist) return;
+      cachedWatchlist = response.watchlist;
+
+      const cardSelectors = '[data-slot="card"], .anime-card, .series-card, .card, [class*="card"], a[href*="/anime/"], a[href*="/series/"], a[href*="/watch/"]';
+      
+      const scanDOM = () => {
+        // 1. Fail-safe: kill interval if extension context is invalidated
+        if (!chrome.runtime?.id) {
+          clearInterval(shiinahScannerInterval);
+          return;
+        }
+
+        // 2. Scan and inject new cards
+        document.querySelectorAll(cardSelectors).forEach(card => {
+           if (card.tagName === 'A' && card.childElementCount === 0) return;
+           processAnimeCard(card, cachedWatchlist);
+        });
+
+        // 3. Memory Cleanup: Remove tooltips if their parent card was destroyed by website pagination
+        document.querySelectorAll('.shiinah-tooltip-container').forEach(tooltip => {
+          if (tooltip._linkedBadge && !document.body.contains(tooltip._linkedBadge)) {
+            tooltip.remove();
+          }
+        });
+      };
+
+      scanDOM(); // Initial immediate scan
+
+      // Run reliably every 2.5s to seamlessly catch all pagination and infinite scrolling
+      if (!shiinahScannerInterval) {
+        shiinahScannerInterval = setInterval(scanDOM, 2500);
+      }
+    });
+  }
+  
+  // Wait a brief moment to ensure single page application frameworks have mounted the DOM
+  setTimeout(initSmartTracker, 1000);
 });
