@@ -837,6 +837,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  // --- NEW: BEHAVIORAL SKIP LEARNING ENGINE ---
+  else if (message.action === "SAVE_LEARNED_SKIP") {
+    chrome.storage.local.get(['learnedSkips'], (res) => {
+      let skips = res.learnedSkips || {};
+      // Initialize arrays for this specific anime
+      if (!skips[message.mediaId]) skips[message.mediaId] = { op: [], ed: [] };
+
+      // Save the exact duration the user skipped
+      if (message.isOP) skips[message.mediaId].op.push(message.duration);
+      else skips[message.mediaId].ed.push(message.duration);
+
+      chrome.storage.local.set({ learnedSkips: skips });
+    });
+    return false;
+  }
+  
+  else if (message.action === "GET_LEARNED_SKIP") {
+    chrome.storage.local.get(['learnedSkips'], (res) => {
+      let skips = res.learnedSkips || {};
+      let data = skips[message.mediaId];
+      
+      // Default to 85 seconds (1:25) if we haven't learned anything yet
+      if (!data) return sendResponse({ op: 85, ed: 85 }); 
+
+      // Average the learned durations for highest accuracy
+      let avgOp = data.op.length ? Math.round(data.op.reduce((a,b)=>a+b,0)/data.op.length) : 85;
+      let avgEd = data.ed.length ? Math.round(data.ed.reduce((a,b)=>a+b,0)/data.ed.length) : 85;
+
+      // Subtract 1 second for human reaction time as requested!
+      sendResponse({ op: avgOp - 1, ed: avgEd - 1 }); 
+    });
+    return true; // Keep channel open for async response
+  }
+
   // ANISKIP NETWORK FETCHER
   else if (message.action === "FETCH_ANISKIP") {
     const url = `https://api.aniskip.com/v2/skip-times/${message.malId}/${message.episode}?types=op&types=ed&episodeLength=0`;

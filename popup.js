@@ -991,31 +991,32 @@ function showAutoDetectView(media, progressNum, detectedType) {
       skipBtn.classList.add('hidden'); // No intros in manga!
     } else {
       skipBtn.classList.remove('hidden');
-      skipBtn.textContent = '⏭ Skip 1:30 (Loading...)'; 
-      
-      if (media.idMal) {
-        chrome.runtime.sendMessage({
-          action: "FETCH_ANISKIP",
-          malId: media.idMal,
-          episode: progressNum
-        }, (res) => {
-          if (res && res.found && res.results && res.results.length > 0) {
-            const formatTime = (secs) => {
-              const m = Math.floor(secs / 60);
-              const s = Math.floor(secs % 60).toString().padStart(2, '0');
-              return `${m}:${s}`;
-            };
-            const { startTime, endTime } = res.results[0].interval;
-            skipBtn.textContent = `⏭ Skip Intro (${formatTime(startTime)} - ${formatTime(endTime)})`;
-            skipBtn.style.color = "#4cca51"; 
-            skipBtn.style.borderColor = "#4cca51";
-          } else {
-            skipBtn.textContent = '⏭ Skip 1:30 (No AniSkip Data)';
-            skipBtn.style.color = "#e74c3c"; 
-            skipBtn.style.borderColor = "#e74c3c";
-          }
-        });
-      }
+      skipBtn.textContent = '⏭ Checking Fallback Tier...';
+
+      // Query the active tab to get the current fallback tier from content.js
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, { action: "GET_ACTIVE_SKIP_TIER" }, (res) => {
+            if (chrome.runtime.lastError || !res) {
+              skipBtn.textContent = '⏭ Skip 1:30 (Tier: Unknown)';
+              skipBtn.style.color = "#e74c3c";
+              skipBtn.style.borderColor = "#e74c3c";
+            } else {
+              skipBtn.textContent = `⏭ Skip 1:30 (${res.tierText})`;
+              
+              // Color code the button based on the active dev tier!
+              if (res.tierText.includes("Tier 1") || res.tierText.includes("Tier 2") || res.tierText.includes("Tier 3")) {
+                skipBtn.style.color = "#4cca51";
+                skipBtn.style.borderColor = "#4cca51";
+              } else {
+                // Warning color for behavioral fallback
+                skipBtn.style.color = "#E5C07B"; 
+                skipBtn.style.borderColor = "#E5C07B";
+              }
+            }
+          });
+        }
+      });
     }
   }
 }
