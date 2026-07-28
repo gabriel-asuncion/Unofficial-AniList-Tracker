@@ -472,9 +472,16 @@ select, input {
   display: none;
 }
 :root {
-  /* Default AniList Blue, will be overwritten by JS */
-  --anilist-color: #3db4f2; 
-  /* A transparent version for backgrounds using modern CSS color-mix */
+  /* Brand & Accent Colors */
+  --anilist-color: #3db4f2; /* Primary blue, synced to user profile */
+  --gold-color: #E5C07B;    /* Accent for levels, leaderboards, OTG */
+  --green-color: #4cca51;   /* Success, completed */
+  --red-color: #e74c3c;     /* Errors, dropped */
+
+  /* UI Element Colors */
+  --bg-primary: #0b1622;
+  --bg-secondary: #151f2e;
+  --border-color: #2b3a4a;
   --anilist-color-bg: color-mix(in srgb, var(--anilist-color) 15%, transparent);
 }
 

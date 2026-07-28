@@ -846,7 +846,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     if (!title) return "";
     return title
       .toLowerCase()
-      .replace(/\.{2,}/g, '') // Remove dots/ellipses
+      .replace(/\.{2,}/g, '') 
       .replace(/[^\w\s]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
@@ -862,11 +862,10 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     'thu', 'fri', 'sat', 'sun'
   ]);
 
-  // Safely check if text is just a UI button/header
-  function isGenericUIText(normText) {
-    if (!normText) return true; // Treat empty strings as generic/invalid
-    if (normText.length < 3) return true; 
-    return IGNORE_UI_WORDS.has(normText);
+  // FIX: Make this a positive check instead of a negative check to avoid empty string bugs
+  function isValidTitle(normText) {
+    if (!normText || normText.length < 3) return false;
+    return !IGNORE_UI_WORDS.has(normText);
   }
 
   function isTitleMatch(normRaw, normTarget) {
@@ -880,57 +879,65 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
   function processAnimeCard(card, watchlist) {
     if (card.hasAttribute('data-shiinah-scanned')) return;
-    
-    // 1. SMART TITLE EXTRACTION
-    let titleEl = card.querySelector('.line-clamp-1, .line-clamp-2, a.font-semibold, h1, h2, h3, h4, h5, .title, .series-title, .anime-title');
+    if (card.parentElement && card.parentElement.closest('[data-shiinah-scanned="true"]')) return;
+
+    let titleEl = card.querySelector('.line-clamp-1, .line-clamp-2, a.font-semibold, h1, h2, h3, h4, h5, .title, .series-title, .anime-title, .manga-title');
     
     if (!titleEl && card.tagName !== 'A') {
-       titleEl = card.querySelector('a[href*="/anime/"], a[href*="/series/"]');
+       titleEl = card.querySelector('a[href*="/anime/"], a[href*="/series/"], a[href*="/manga/"], a[href*="/chapter/"]');
     }
     if (!titleEl && card.tagName === 'A') {
        titleEl = card;
     }
 
-    // FIX: Use textContent to grab text instantly, ignoring CSS rendering delays
     let rawText = titleEl ? (titleEl.textContent || '').trim() : '';
-
     const imgEl = card.querySelector('img');
     const altText = imgEl ? (imgEl.getAttribute('alt') || '').trim() : '';
 
     const normRawText = normalizeTitle(rawText);
     const normAltText = normalizeTitle(altText);
 
-    // 2. SAFETY CHECKS: Ensure at least one text source is a valid title
-    const isRawGeneric = isGenericUIText(normRawText);
-    const isAltGeneric = isGenericUIText(normAltText);
+    const validRaw = isValidTitle(normRawText);
+    const validAlt = isValidTitle(normAltText);
 
-    // If both the inner text and the image alt are missing/generic UI words, skip it!
-    if (isRawGeneric && isAltGeneric) return;
+    if (!validRaw && !validAlt) return;
 
-    // Mark as scanned to prevent loop spam
     card.setAttribute('data-shiinah-scanned', 'true');
+    const displayTitle = validRaw ? rawText : altText;
 
-    // Use the best available raw text for the tooltip display
-    const displayTitle = (rawText.length > altText.length ? rawText : altText) || rawText;
-
-    // 3. MATCH AGAINST WATCHLIST
     const match = watchlist.find(entry => {
       const normEng = normalizeTitle(entry.media?.title?.english);
       const normRom = normalizeTitle(entry.media?.title?.romaji);
-      return isTitleMatch(normRawText, normEng) || isTitleMatch(normRawText, normRom) ||
-             isTitleMatch(normAltText, normEng) || isTitleMatch(normAltText, normRom);
+      
+      let isMatch = false;
+      if (validRaw) {
+         isMatch = isMatch || isTitleMatch(normRawText, normEng) || isTitleMatch(normRawText, normRom);
+      }
+      if (validAlt) {
+         isMatch = isMatch || isTitleMatch(normAltText, normEng) || isTitleMatch(normAltText, normRom);
+      }
+      return isMatch;
     });
 
-    // 4. INJECT BADGE
-    // Ensure the card can anchor the absolute-positioned badge
     const style = window.getComputedStyle(card);
     if (style.position === 'static') card.style.position = 'relative';
 
     if (match) {
       injectInteractiveBadge(card, match, true, displayTitle);
     } else {
-      // Unlisted Anime 
       injectInteractiveBadge(card, { media: { title: { romaji: displayTitle } } }, false, displayTitle);
+    }
+  }
+
+  function formatStatusLabel(status) {
+    if (!status) return 'UNKNOWN';
+    switch(status.toUpperCase()) {
+      case 'RELEASING': return 'Releasing';
+      case 'FINISHED': return 'Finished';
+      case 'HIATUS': return 'On Hiatus';
+      case 'CANCELLED': return 'Cancelled';
+      case 'NOT_YET_RELEASED': return 'Not Yet Released';
+      default: return status;
     }
   }
 
@@ -938,12 +945,15 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     const media = entry.media;
     const currentProgress = entry.progress || 0;
     
-    let latestEp = media.episodes || media.chapters || '?';
+    const isManga = media.chapters !== undefined || media.format === 'MANGA' || media.format === 'NOVEL';
+    const unitLabel = isManga ? 'Ch' : 'Ep';
+
+    let latestCount = media.episodes || media.chapters || '?';
     if (media.nextAiringEpisode) {
-      latestEp = media.nextAiringEpisode.episode - 1;
+      latestCount = media.nextAiringEpisode.episode - 1;
     }
 
-    const isUpToDate = latestEp !== '?' && currentProgress >= latestEp;
+    const isUpToDate = latestCount !== '?' && currentProgress >= latestCount;
     
     let activeSvg, themeColor;
     if (!isWatchlisted) {
@@ -957,14 +967,13 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       themeColor = '#e74c3c';
     }
 
-    // 1. Badge Wrapper
     const badgeWrapper = document.createElement('span');
     badgeWrapper.className = 'shiinah-inline-badge';
     Object.assign(badgeWrapper.style, {
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
-      position: 'absolute', // Absolute positioning puts it neatly over the card!
+      position: 'absolute', 
       top: '8px',
       right: '8px',
       cursor: 'pointer',
@@ -975,13 +984,12 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     badgeWrapper.innerHTML = `<img src="${activeSvg}" style="width: 22px; height: 22px; pointer-events: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));">`;
     targetEl.appendChild(badgeWrapper);
 
-    // 2. Body-Level Tooltip
     const tooltip = document.createElement('div');
-    tooltip.className = 'shiinah-tooltip-container'; // Added for memory cleanup
-    tooltip._linkedBadge = badgeWrapper; // Links this tooltip to its specific badge
+    tooltip.className = 'shiinah-tooltip-container'; 
+    tooltip._linkedBadge = badgeWrapper; 
     
     Object.assign(tooltip.style, {
-      position: 'absolute',
+      position: 'fixed', 
       width: '290px',
       padding: '16px',
       backgroundColor: '#0b1119',
@@ -1002,7 +1010,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     bridge.style.cssText = 'position: absolute; bottom: -15px; left: 0; width: 100%; height: 15px; background: transparent;';
     tooltip.appendChild(bridge);
 
-    // Stop click events ONLY on the badge wrapper so site links don't trigger
     badgeWrapper.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -1010,15 +1017,16 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
     const headerHtml = isWatchlisted 
       ? `
-        <div style="font-size: 11px; color: #9fadbd; font-weight: bold; text-align: center; letter-spacing: 0.5px; margin-bottom: 4px;">CURRENT PROGRESS</div>
-        <div style="font-size: 22px; color: #fff; font-weight: 900; text-align: center; letter-spacing: 1px; margin-bottom: 8px;">
-          <span style="color: ${themeColor};">${currentProgress}</span> / <span style="color: #677b94;">${latestEp}</span>
+        <div style="font-size: 11px; color: #9fadbd; font-weight: bold; text-align: center; letter-spacing: 0.5px; margin-bottom: 4px;">PROGRESS (${unitLabel})</div>
+        <div style="font-size: 22px; color: #fff; font-weight: 900; text-align: center; letter-spacing: 1px; margin-bottom: 4px;">
+          <span style="color: ${themeColor};">${currentProgress}</span> / <span style="color: #677b94;">${latestCount}</span>
         </div>
+        <div class="shiinah-media-status" style="font-size: 11px; color: #E5C07B; text-align: center; font-weight: bold;"></div>
       ` 
       : `
         <div style="font-size: 11px; color: #9fadbd; font-weight: bold; text-align: center; letter-spacing: 0.5px;">STATUS</div>
-        <div style="font-size: 16px; color: #FFD345; font-weight: bold; text-align: center; margin-bottom: 8px;">Not in Watchlist</div>
-        <button class="shiinah-add-btn" style="display: none; margin-bottom: 8px; background: #3db4f2; color: #fff; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; transition: 0.2s;">+ Add to AniList</button>
+        <div style="font-size: 16px; color: #FFD345; font-weight: bold; text-align: center; margin-bottom: 8px;">Not in List</div>
+        <button class="shiinah-add-btn" style="display: none; margin-bottom: 8px; background: #3db4f2; color: #fff; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; transition: 0.2s;">+ Add Entry</button>
       `;
 
     tooltip.innerHTML = `
@@ -1027,7 +1035,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         <button class="shiinah-stat-tab active-tab" data-platform="al" style="background: #3db4f2; color: #0b1119; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">AL Stats</button>
         <button class="shiinah-stat-tab" data-platform="mal" style="background: #1a2636; color: #9fadbd; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">MAL Stats</button>
       </div>
-      <div class="shiinah-stats-body"><div style="text-align: center; color: #677b94; font-size: 12px; padding: 15px;">Loading distribution...</div></div>
+      <div class="shiinah-stats-body"><div style="text-align: center; color: #677b94; font-size: 12px; padding: 15px;">Loading details...</div></div>
     `;
 
     document.body.appendChild(tooltip);
@@ -1038,9 +1046,14 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     function renderChart(platformKey) {
       const statsBody = tooltip.querySelector('.shiinah-stats-body');
       const activeData = cachedStats ? cachedStats[platformKey] : null;
+
+      if (cachedStats?.meta?.status) {
+        const statusEl = tooltip.querySelector('.shiinah-media-status');
+        if (statusEl) statusEl.textContent = `Status: ${formatStatusLabel(cachedStats.meta.status)}`;
+      }
       
       if (!activeData || !activeData.scoreDistribution || activeData.scoreDistribution.length === 0) {
-        statsBody.innerHTML = `<div style="text-align: center; color: #e74c3c; font-size: 12px; padding: 15px;">No ${platformKey.toUpperCase()} data available</div>`;
+        statsBody.innerHTML = `<div style="text-align: center; color: #e74c3c; font-size: 12px; padding: 15px;">No ${platformKey.toUpperCase()} distribution available</div>`;
         return;
       }
 
@@ -1096,12 +1109,12 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       tooltip.style.display = 'flex';
       
       const rect = badgeWrapper.getBoundingClientRect();
-      let top = rect.top + window.scrollY - tooltip.offsetHeight - 15;
-      let left = rect.left + window.scrollX + (rect.width / 2) - (tooltip.offsetWidth / 2);
+      let top = rect.top - tooltip.offsetHeight - 15;
+      let left = rect.left + (rect.width / 2) - (tooltip.offsetWidth / 2);
 
       if (left < 10) left = 10;
       if (left + tooltip.offsetWidth > window.innerWidth - 10) left = window.innerWidth - tooltip.offsetWidth - 10;
-      if (top < window.scrollY) top = rect.bottom + window.scrollY + 15; 
+      if (top < 10) top = rect.bottom + 15; 
 
       tooltip.style.top = `${top}px`;
       tooltip.style.left = `${left}px`;
@@ -1113,12 +1126,17 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
             if (!chrome.runtime?.id) return;
             
             const actionName = isWatchlisted ? "FETCH_MEDIA_STATS" : "SEARCH_AND_FETCH_STATS";
+            
+            // FIX: Intelligently determine the Media Type based on the site or card!
+            const isMangaSite = window.location.href.includes('manga') || window.location.href.includes('read') || targetEl.closest('.manga-card') || targetEl.querySelector('a[href*="/manga/"], a[href*="/chapter/"]');
+            const mediaType = (entry.media && entry.media.format === 'MANGA') ? 'MANGA' : (isMangaSite ? 'MANGA' : 'ANIME');
+
             const payload = isWatchlisted 
-              ? { action: actionName, mediaId: media.id, malId: media.idMal }
-              : { action: actionName, title: rawText };
+              ? { action: actionName, mediaId: media.id, malId: media.idMal, mediaType: mediaType }
+              : { action: actionName, title: rawText, mediaType: mediaType };
 
             chrome.runtime.sendMessage(payload, (res) => {
-              cachedStats = res?.stats || { al: null, mal: null };
+              cachedStats = res?.stats || { al: null, mal: null, meta: null };
               renderChart(currentPlatform);
 
               if (!isWatchlisted && res?.media?.id) {
@@ -1129,7 +1147,14 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
                     e.preventDefault();
                     e.stopPropagation();
                     addBtn.textContent = 'Adding...';
-                    chrome.runtime.sendMessage({ action: "ADD_TO_WATCHLIST", mediaId: res.media.id }, (addRes) => {
+                    
+                    // FIX: Pass the mediaType and malId down to the background!
+                    chrome.runtime.sendMessage({ 
+                      action: "ADD_TO_WATCHLIST", 
+                      mediaId: res.media.id,
+                      malId: res.media.idMal,
+                      mediaType: mediaType 
+                    }, (addRes) => {
                       if (addRes?.success) {
                         addBtn.textContent = 'Added! ✓';
                         addBtn.style.background = '#4cca51';
@@ -1162,10 +1187,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     tooltip.addEventListener('mouseleave', scheduleHide);
   }
 
-  // ==========================================
-  // 🔄 SMART INTERVAL ENGINE & ORPHAN CLEANUP
-  // ==========================================
-  
+  // --- SMART SCANNER ENGINE ---
   let shiinahScannerInterval = null;
   let cachedWatchlist = [];
 
@@ -1176,22 +1198,19 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       if (chrome.runtime.lastError || !response || !response.watchlist) return;
       cachedWatchlist = response.watchlist;
 
-      const cardSelectors = '[data-slot="card"], .anime-card, .series-card, .card, [class*="card"], a[href*="/anime/"], a[href*="/series/"], a[href*="/watch/"]';
+      const cardSelectors = '[data-slot="card"], .anime-card, .series-card, .manga-card, .card, [class*="card"], a[href*="/anime/"], a[href*="/series/"], a[href*="/manga/"], a[href*="/chapter/"], a[href*="/watch/"]';
       
       const scanDOM = () => {
-        // 1. Fail-safe: kill interval if extension context is invalidated
         if (!chrome.runtime?.id) {
           clearInterval(shiinahScannerInterval);
           return;
         }
 
-        // 2. Scan and inject new cards
         document.querySelectorAll(cardSelectors).forEach(card => {
            if (card.tagName === 'A' && card.childElementCount === 0) return;
            processAnimeCard(card, cachedWatchlist);
         });
 
-        // 3. Memory Cleanup: Remove tooltips if their parent card was destroyed by website pagination
         document.querySelectorAll('.shiinah-tooltip-container').forEach(tooltip => {
           if (tooltip._linkedBadge && !document.body.contains(tooltip._linkedBadge)) {
             tooltip.remove();
@@ -1199,15 +1218,13 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         });
       };
 
-      scanDOM(); // Initial immediate scan
+      scanDOM();
 
-      // Run reliably every 2.5s to seamlessly catch all pagination and infinite scrolling
       if (!shiinahScannerInterval) {
         shiinahScannerInterval = setInterval(scanDOM, 2500);
       }
     });
   }
   
-  // Wait a brief moment to ensure single page application frameworks have mounted the DOM
   setTimeout(initSmartTracker, 1000);
 });

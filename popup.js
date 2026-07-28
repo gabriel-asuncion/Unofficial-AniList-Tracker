@@ -170,35 +170,36 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
     }
     
-    // Re-attach listeners to the newly injected options!
-    document.querySelectorAll('.filter-option').forEach(option => {
-      option.addEventListener('click', (e) => {
-        currentFilter = e.target.dataset.value; 
-        document.getElementById('current-view-label').textContent = e.target.textContent + ' ▾';
-        document.getElementById('filter-dropdown').classList.add('hidden');
-        document.getElementById('search-input').value = ''; 
-        
-        if (currentFilter === 'LEADERBOARD') {
-          document.getElementById('main-view').classList.add('hidden');
-          document.getElementById('search-input').classList.add('hidden');
-          document.getElementById('profile-view').classList.add('hidden');
-          document.getElementById('leaderboard-view').classList.remove('hidden');
-          if (typeof loadLeaderboard === 'function') loadLeaderboard();
-          if (typeof loadAchievementsUI === 'function') loadAchievementsUI(userId);
-        } else if (currentFilter === 'UNFINISHED') {
-          document.getElementById('leaderboard-view').classList.add('hidden');
-          document.getElementById('profile-view').classList.add('hidden');
-          document.getElementById('main-view').classList.remove('hidden');
-          document.getElementById('day-tabs').classList.add('hidden'); 
-          document.getElementById('search-input').classList.remove('hidden');
-          loadUnfinishedList();
-        } else if (accessToken) {
-          document.getElementById('leaderboard-view').classList.add('hidden');
-          document.getElementById('profile-view').classList.add('hidden');
-          document.getElementById('main-view').classList.remove('hidden');
-          loadAnimeList();
-        }
-      });
+    // Event delegation is now handled by a single listener on the dropdown container
+  }
+
+  const filterDropdown = document.getElementById('filter-dropdown');
+  if (filterDropdown) {
+    filterDropdown.addEventListener('click', (e) => {
+      const target = e.target.closest('.filter-option');
+      if (!target) return;
+
+      currentFilter = target.dataset.value;
+      document.getElementById('current-view-label').textContent = target.textContent + ' ▾';
+      filterDropdown.classList.add('hidden');
+      document.getElementById('search-input').value = '';
+
+      if (currentFilter === 'LEADERBOARD') {
+        document.getElementById('main-view').classList.add('hidden');
+        document.getElementById('search-input').classList.add('hidden');
+        document.getElementById('profile-view').classList.add('hidden');
+        document.getElementById('leaderboard-view').classList.remove('hidden');
+        if (typeof loadLeaderboard === 'function') loadLeaderboard();
+      } else if (currentFilter === 'UNFINISHED') {
+        document.getElementById('leaderboard-view').classList.add('hidden');
+        document.getElementById('profile-view').classList.add('hidden');
+        document.getElementById('main-view').classList.remove('hidden');
+        document.getElementById('day-tabs').classList.add('hidden');
+        document.getElementById('search-input').classList.remove('hidden');
+        loadUnfinishedList();
+      } else if (accessToken) {
+        loadAnimeList();
+      }
     });
   }
 
@@ -254,37 +255,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('user-profile').addEventListener('click', (e) => {
     e.stopPropagation();
     document.getElementById('filter-dropdown').classList.toggle('hidden');
-  });
-
-  document.querySelectorAll('.filter-option').forEach(option => {
-    option.addEventListener('click', (e) => {
-      currentFilter = e.target.dataset.value; 
-      document.getElementById('current-view-label').textContent = e.target.textContent + ' ▾';
-      document.getElementById('filter-dropdown').classList.add('hidden');
-      document.getElementById('search-input').value = ''; 
-      
-      // View Replacement Logic
-      if (currentFilter === 'LEADERBOARD') {
-        document.getElementById('main-view').classList.add('hidden');
-        document.getElementById('search-input').classList.add('hidden');
-        document.getElementById('profile-view').classList.add('hidden');
-        document.getElementById('leaderboard-view').classList.remove('hidden');
-        if (typeof loadLeaderboard === 'function') loadLeaderboard();
-        if (typeof loadAchievementsUI === 'function') loadAchievementsUI(userId);
-      } else if (currentFilter === 'UNFINISHED') {
-        document.getElementById('leaderboard-view').classList.add('hidden');
-        document.getElementById('profile-view').classList.add('hidden');
-        document.getElementById('main-view').classList.remove('hidden');
-        document.getElementById('day-tabs').classList.add('hidden'); 
-        document.getElementById('search-input').classList.remove('hidden');
-        loadUnfinishedList();
-      } else if (accessToken) {
-        document.getElementById('leaderboard-view').classList.add('hidden');
-        document.getElementById('profile-view').classList.add('hidden');
-        document.getElementById('main-view').classList.remove('hidden');
-        loadAnimeList();
-      }
-    });
   });
 
   document.addEventListener('click', (e) => {
@@ -455,11 +425,129 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Save ignored domain when user clicks "Skip for now"
   const whitelistCancelBtn = document.getElementById('whitelist-cancel-btn');
   if (whitelistCancelBtn) {
     whitelistCancelBtn.addEventListener('click', () => {
+      const hostnameEl = document.getElementById('whitelist-hostname');
+      if (hostnameEl) {
+        const hostname = hostnameEl.textContent;
+        chrome.storage.local.get(['ignoredDomains'], (result) => {
+          const ignored = result.ignoredDomains || [];
+          if (!ignored.includes(hostname)) {
+            ignored.push(hostname);
+            chrome.storage.local.set({ ignoredDomains: ignored });
+          }
+        });
+      }
+      
       document.getElementById('whitelist-view').classList.add('hidden');
       loadAnimeList(); 
+    });
+  }
+
+  // Broad Keyword & Strict Title Detector
+  async function checkCurrentTabForAnime() {
+    return new Promise((resolve) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        if (!tabs || tabs.length === 0) return resolve(false);
+        
+        const title = tabs[0].title || "";
+        let hostname = "unknown";
+        try { if (tabs[0].url) hostname = new URL(tabs[0].url).hostname; } catch (e) {}
+
+        let parsedTitle = "";
+        let parsedProgress = 0;
+        let detectedType = null; 
+
+        // 1. Anime Episode Regex
+        const animeRegex = /(?:Watch\s+)?(.*?)\s*(?:[-|—–:~]+\s*)?(?:Season\s*\d+\s*)?(?:Episode|Ep|EP|E)\.?\s*0*(\d+)/i;
+        const animeMatch = title.match(animeRegex);
+        
+        if (animeMatch && animeMatch[1] && animeMatch[2]) {
+          parsedTitle = animeMatch[1].replace(/[-|—–:~]+$/g, '').replace(/\s+\(?(?:Sub|Dub)\)?$/i, '').trim();
+          parsedProgress = parseInt(animeMatch[2], 10);
+          detectedType = 'ANIME';
+        } 
+        // 2. Manga Chapter Regex
+        else {
+          const chapRegex = /(?:Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)/i;
+          const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
+          
+          const chapMatch = title.match(chapRegex) || title.match(looseRegex);
+          
+          if (chapMatch) {
+            parsedProgress = parseFloat(chapMatch[1]);
+            const leftSide = title.substring(0, chapMatch.index).trim();
+            const rightSide = title.substring(chapMatch.index + chapMatch[0].length).trim();
+            let targetText = "";
+            
+            const cleanLeft = leftSide.replace(/[()[\]|]/g, '').trim();
+            if (cleanLeft === '' || /^(?:page\s*)?\d+\s*[-/]?\s*(?:\d+)?$/i.test(cleanLeft)) {
+              targetText = rightSide.replace(/[-|—|\|]\s*[a-zA-Z0-9]+$/i, '').trim();
+            } else {
+              targetText = leftSide;
+            }
+
+            let clean = targetText.replace(/\b(?:Read|Watch|Free|English|Online|Scanlation|Scans|Scan|Manga|Manhwa|Manhua|Webtoon)\b/gi, '');
+            clean = clean.replace(/\[.*?\]|\(.*?\)/g, '');
+            parsedTitle = clean.replace(/^[-|—–:~,\|\s]+|[-|—–:~,\|\s]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+            detectedType = 'MANGA';
+          }
+        }
+
+        // Whitelist & Ignored Domain Checks
+        chrome.storage.local.get(['whitelistedDomains', 'ignoredDomains'], async (result) => {
+          const domains = result.whitelistedDomains || [];
+          const ignored = result.ignoredDomains || [];
+          
+          const isWhitelisted = domains.some(d => hostname.includes(d));
+          const isIgnored = ignored.some(d => hostname.includes(d));
+
+          if (detectedType) {
+            if (!isWhitelisted && !isIgnored) {
+              showWhitelistView(hostname);
+              return resolve(true); 
+            }
+            
+            if (isWhitelisted) {
+              try {
+                let media = await searchAnimeWithFallbacks(parsedTitle, detectedType);
+                
+                if (!media && detectedType === 'MANGA') {
+                  media = {
+                    id: -1, 
+                    title: { romaji: parsedTitle, english: null },
+                    coverImage: { medium: 'icons/icon128.png', large: 'icons/icon128.png' }, 
+                    chapters: '?',
+                    mediaListEntry: null 
+                  };
+                }
+
+                if (media) {
+                  detectedMedia = media;
+                  detectedEpisode = parsedProgress; 
+                  showAutoDetectView(media, parsedProgress, detectedType);
+                  return resolve(true);
+                }
+              } catch (e) {}
+            }
+            resolve(false);
+          } else {
+            // Broad Domain/Title Keyword Fallback
+            const keywordRegex = /anime|manga|manhwa|manhua|webtoon/i;
+            const isAnimeSite = keywordRegex.test(title) || keywordRegex.test(hostname);
+            const isValidHost = hostname !== "unknown" && !hostname.includes("chrome") && !hostname.includes("google.");
+
+            if (isAnimeSite && isValidHost && !isWhitelisted && !isIgnored) {
+              showWhitelistView(hostname);
+              return resolve(true);
+            }
+            
+            resolve(false);
+          }
+        });
+      });
     });
   }
 
@@ -811,9 +899,9 @@ async function checkCurrentTabForAnime() {
 
       let parsedTitle = "";
       let parsedProgress = 0;
-      let detectedType = null; // NEW: Stores whether we found Anime or Manga
+      let detectedType = null; 
 
-      // 1. Try Anime Regex First
+      // 1. Try Anime Regex First (Strict Match)
       const animeRegex = /(?:Watch\s+)?(.*?)\s*(?:[-|—–:~]+\s*)?(?:Season\s*\d+\s*)?(?:Episode|Ep|EP|E)\.?\s*0*(\d+)/i;
       const animeMatch = title.match(animeRegex);
       
@@ -822,7 +910,7 @@ async function checkCurrentTabForAnime() {
         parsedProgress = parseInt(animeMatch[2], 10);
         detectedType = 'ANIME';
       } 
-      // 2. Try Manga Regex if Anime fails
+      // 2. Try Manga Regex if Anime fails (Strict Match)
       else {
         const chapRegex = /(?:Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)/i;
         const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
@@ -831,73 +919,78 @@ async function checkCurrentTabForAnime() {
         
         if (chapMatch) {
           parsedProgress = parseFloat(chapMatch[1]);
-          
-          // STEP 1: Intelligent Left/Right Splitting
           const leftSide = title.substring(0, chapMatch.index).trim();
           const rightSide = title.substring(chapMatch.index + chapMatch[0].length).trim();
-          
           let targetText = "";
           
-          // Check if the left side is just a page number (e.g., "1 |", "Page 1", "(1/32)")
           const cleanLeft = leftSide.replace(/[()[\]|]/g, '').trim();
           if (cleanLeft === '' || /^(?:page\s*)?\d+\s*[-/]?\s*(?:\d+)?$/i.test(cleanLeft)) {
-            // Title is on the right (MangaDex style). 
-            // We also strip the trailing site name (e.g., "- MangaDex")
             targetText = rightSide.replace(/[-|—|\|]\s*[a-zA-Z0-9]+$/i, '').trim();
           } else {
-            // Title is on the left (MangaNato style).
             targetText = leftSide;
           }
 
-          // STEP 2: Safely strip junk words using word boundaries (\b)
           let clean = targetText.replace(/\b(?:Read|Watch|Free|English|Online|Scanlation|Scans|Scan|Manga|Manhwa|Manhua|Webtoon)\b/gi, '');
-          
-          // STEP 3: Strip leftover brackets
           clean = clean.replace(/\[.*?\]|\(.*?\)/g, '');
-          
-          // STEP 4: Final trim of stray punctuation at the edges
           parsedTitle = clean.replace(/^[-|—–:~,\|\s]+|[-|—–:~,\|\s]+$/g, '').replace(/\s{2,}/g, ' ').trim();
           detectedType = 'MANGA';
         }
       }
 
-      // 3. Process the results if a match was found
-      if (detectedType) {
-        chrome.storage.local.get(['whitelistedDomains'], async (result) => {
-          const domains = result.whitelistedDomains || [];
-          const isWhitelisted = domains.some(d => hostname.includes(d));
+      // Fetch domains to determine if we should prompt the user
+      chrome.storage.local.get(['whitelistedDomains', 'ignoredDomains'], async (result) => {
+        const domains = result.whitelistedDomains || [];
+        const ignored = result.ignoredDomains || [];
+        
+        const isWhitelisted = domains.some(d => hostname.includes(d));
+        const isIgnored = ignored.some(d => hostname.includes(d));
 
-          if (!isWhitelisted) {
+        // 3. Process the results if a strict episode/chapter match was found
+        if (detectedType) {
+          if (!isWhitelisted && !isIgnored) {
             showWhitelistView(hostname);
             return resolve(true); 
           }
           
-          try {
-            let media = await searchAnimeWithFallbacks(parsedTitle, detectedType);
-            
-            // --- NEW: FALLBACK UI MOCKER ---
-            // If AniList returns nothing, but we know it's a Manga, build a mock card!
-            if (!media && detectedType === 'MANGA') {
-              media = {
-                id: -1, // Use a negative ID to flag it as a custom title
-                title: { romaji: parsedTitle, english: null },
-                coverImage: { medium: 'icons/icon128.png', large: 'icons/icon128.png' }, // Use extension icon as placeholder
-                chapters: '?',
-                mediaListEntry: null 
-              };
-            }
-            // -------------------------------
+          if (isWhitelisted) {
+            try {
+              let media = await searchAnimeWithFallbacks(parsedTitle, detectedType);
+              
+              if (!media && detectedType === 'MANGA') {
+                media = {
+                  id: -1, 
+                  title: { romaji: parsedTitle, english: null },
+                  coverImage: { medium: 'icons/icon128.png', large: 'icons/icon128.png' }, 
+                  chapters: '?',
+                  mediaListEntry: null 
+                };
+              }
 
-            if (media) {
-              detectedMedia = media;
-              detectedEpisode = parsedProgress; 
-              showAutoDetectView(media, parsedProgress, detectedType);
-              return resolve(true);
-            }
-          } catch (e) {}
+              if (media) {
+                detectedMedia = media;
+                detectedEpisode = parsedProgress; 
+                showAutoDetectView(media, parsedProgress, detectedType);
+                return resolve(true);
+              }
+            } catch (e) {}
+          }
           resolve(false);
-        });
-      } else { resolve(false); }
+        } else {
+          // 4. --- NEW: Broad Domain/Title Check for Whitelist Prompt ---
+          const keywordRegex = /anime|manga|manhwa|manhua|webtoon/i;
+          const isAnimeSite = keywordRegex.test(title) || keywordRegex.test(hostname);
+          
+          // Ensure we don't accidentally prompt on Google searches or extension pages
+          const isValidHost = hostname !== "unknown" && !hostname.includes("chrome") && !hostname.includes("google.");
+
+          if (isAnimeSite && isValidHost && !isWhitelisted && !isIgnored) {
+            showWhitelistView(hostname);
+            return resolve(true);
+          }
+          
+          resolve(false);
+        }
+      });
     });
   });
 }

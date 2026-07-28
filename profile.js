@@ -128,22 +128,20 @@ async function loadLeaderboard() {
       // Relies on global userId from popup.js
       const isMe = (typeof userId !== 'undefined') && user.anilist_user_id === userId;
       const row = document.createElement('div');
-      
-      row.style.display = 'flex';
-      row.style.alignItems = 'center';
-      row.style.padding = '8px 5px';
-      row.style.borderBottom = '1px solid #1a2636';
-      row.style.backgroundColor = isMe ? 'rgba(61, 180, 242, 0.1)' : 'transparent';
+      row.className = 'leaderboard-row';
+      if (isMe) {
+        row.classList.add('is-user');
+      }
       
       const rankColor = index === 0 ? '#FFD700' : index === 1 ? '#C0C0C0' : index === 2 ? '#CD7F32' : '#9fadbd';
 
       row.innerHTML = `
-        <div style="width: 20px; font-weight: bold; color: ${rankColor}; font-size: 14px;">#${index + 1}</div>
-        <img src="${user.avatar_url || ''}" style="width: 24px; height: 24px; border-radius: 50%; margin: 0 10px; object-fit: cover;">
-        <div style="flex-grow: 1; font-size: 13px; color: ${isMe ? '#3db4f2' : '#fff'}; font-weight: ${isMe ? 'bold' : 'normal'};">
+        <div class="leaderboard-rank" style="color: ${rankColor};">#${index + 1}</div>
+        <img src="${user.avatar_url || ''}" class="leaderboard-avatar">
+        <div class="leaderboard-name">
           ${user.username}
         </div>
-        <div style="font-size: 12px; font-weight: bold; color: #E5C07B; background: rgba(229, 192, 123, 0.1); padding: 2px 6px; border-radius: 4px;">
+        <div class="leaderboard-level">
           Lv. ${user.level}
         </div>
       `;
