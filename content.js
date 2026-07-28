@@ -862,15 +862,17 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     'thu', 'fri', 'sat', 'sun'
   ]);
 
+  // Safely check if text is just a UI button/header
   function isGenericUIText(normText) {
-    if (!normText || normText.length < 3) return true;
+    if (!normText) return true; // Treat empty strings as generic/invalid
+    if (normText.length < 3) return true; 
     return IGNORE_UI_WORDS.has(normText);
   }
 
   function isTitleMatch(normRaw, normTarget) {
     if (!normRaw || !normTarget) return false;
     if (normRaw === normTarget) return true;
-    // Handle truncated on-screen titles (e.g., "The Forsaken..." matching "The Forsaken Saintess...")
+    // Handle truncated on-screen titles
     if (normRaw.length >= 4 && normTarget.startsWith(normRaw)) return true;
     if (normTarget.length >= 4 && normRaw.startsWith(normTarget)) return true;
     return false;
@@ -879,45 +881,39 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   function processAnimeCard(card, watchlist) {
     if (card.hasAttribute('data-shiinah-scanned')) return;
     
-    // Prevent processing giant layout containers that happen to share class names
-    if (card.offsetWidth > window.innerWidth * 0.8 || card.offsetHeight > 800) return;
-
-    // 1. SMART TITLE EXTRACTION: Prioritize specific classes known to hold titles (e.g. line-clamp used in Anime Nexus)
+    // 1. SMART TITLE EXTRACTION
     let titleEl = card.querySelector('.line-clamp-1, .line-clamp-2, a.font-semibold, h1, h2, h3, h4, h5, .title, .series-title, .anime-title');
     
-    // Fallback: the first link inside the card that looks like a series link
     if (!titleEl && card.tagName !== 'A') {
        titleEl = card.querySelector('a[href*="/anime/"], a[href*="/series/"]');
     }
-    
-    // Fallback: If the card IS the link, use the card itself
     if (!titleEl && card.tagName === 'A') {
        titleEl = card;
     }
 
-    let rawText = titleEl ? titleEl.innerText.trim() : '';
+    // FIX: Use textContent to grab text instantly, ignoring CSS rendering delays
+    let rawText = titleEl ? (titleEl.textContent || '').trim() : '';
 
-    // Check image ALT as a backup (crucial for 1Anime!)
     const imgEl = card.querySelector('img');
     const altText = imgEl ? (imgEl.getAttribute('alt') || '').trim() : '';
 
-    // Clean up text
     const normRawText = normalizeTitle(rawText);
     const normAltText = normalizeTitle(altText);
 
-    // If we couldn't find ANY text, stop.
-    if (normRawText.length < 3 && normAltText.length < 3) return;
+    // 2. SAFETY CHECKS: Ensure at least one text source is a valid title
+    const isRawGeneric = isGenericUIText(normRawText);
+    const isAltGeneric = isGenericUIText(normAltText);
 
-    // Ensure we aren't tagging generic UI (like "Latest Episodes")
-    if (isGenericUIText(normRawText) || isGenericUIText(normAltText)) return;
+    // If both the inner text and the image alt are missing/generic UI words, skip it!
+    if (isRawGeneric && isAltGeneric) return;
 
-    // Mark as scanned
+    // Mark as scanned to prevent loop spam
     card.setAttribute('data-shiinah-scanned', 'true');
 
-    // Best display text (usually the longer, uncut alt text)
+    // Use the best available raw text for the tooltip display
     const displayTitle = (rawText.length > altText.length ? rawText : altText) || rawText;
 
-    // Match against Watchlist
+    // 3. MATCH AGAINST WATCHLIST
     const match = watchlist.find(entry => {
       const normEng = normalizeTitle(entry.media?.title?.english);
       const normRom = normalizeTitle(entry.media?.title?.romaji);
@@ -925,13 +921,15 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
              isTitleMatch(normAltText, normEng) || isTitleMatch(normAltText, normRom);
     });
 
-    // Prepare card for absolute badge injection
+    // 4. INJECT BADGE
+    // Ensure the card can anchor the absolute-positioned badge
     const style = window.getComputedStyle(card);
     if (style.position === 'static') card.style.position = 'relative';
 
     if (match) {
       injectInteractiveBadge(card, match, true, displayTitle);
     } else {
+      // Unlisted Anime 
       injectInteractiveBadge(card, { media: { title: { romaji: displayTitle } } }, false, displayTitle);
     }
   }
