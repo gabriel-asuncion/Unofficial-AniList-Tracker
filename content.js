@@ -171,6 +171,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     return videos;
   }
 
+  let skipSyncInterval = null;
+
   function mountSkipButton(activeSkip) {
     if (document.getElementById('aniskip-float-btn')) return;
     
@@ -179,39 +181,51 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     btn.innerHTML = activeSkip.skipType === 'ed' ? '▶ Skip Outro' : '▶ Skip Intro';
     
     Object.assign(btn.style, {
-      position: 'absolute', bottom: '70px', right: '30px', zIndex: '2147483647',
+      position: 'fixed', zIndex: '2147483647',
       backgroundColor: 'rgba(21, 31, 46, 0.85)', color: '#fff', border: '1px solid #3db4f2',
       padding: '12px 20px', borderRadius: '6px', cursor: 'pointer',
       fontFamily: 'system-ui, sans-serif', fontWeight: 'bold', fontSize: '15px',
-      transition: 'all 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+      transition: 'all 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+      pointerEvents: 'auto'
     });
 
     btn.addEventListener('mouseenter', () => btn.style.backgroundColor = 'rgba(61, 180, 242, 0.9)');
     btn.addEventListener('mouseleave', () => btn.style.backgroundColor = 'rgba(21, 31, 46, 0.85)');
     
     btn.addEventListener('click', (e) => {
-      e.stopPropagation(); 
+      e.preventDefault(); e.stopPropagation(); 
       if (trackedVideo && activeSkip && activeSkip.interval.endTime) {
         trackedVideo.currentTime = activeSkip.interval.endTime;
-        const toastMsg = activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!';
-        showInPageToast('success', 'Skipped', toastMsg);
+        showInPageToast('success', 'Skipped', activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!');
         unmountSkipButton();
       }
     });
 
-    const container = trackedVideo.parentElement;
-    if (window.getComputedStyle(container).position === 'static') {
-      container.style.position = 'relative';
-    }
+    const container = document.fullscreenElement || document.body;
     container.appendChild(btn);
     skipButtonMounted = true;
+
+    // Track the video position and mathematically pin the button to the bottom right
+    if (skipSyncInterval) clearInterval(skipSyncInterval);
+    skipSyncInterval = setInterval(() => {
+      if (!trackedVideo) return;
+      const currentContainer = document.fullscreenElement || document.body;
+      if (btn.parentElement !== currentContainer) currentContainer.appendChild(btn);
+      
+      const rect = trackedVideo.getBoundingClientRect();
+      btn.style.bottom = (window.innerHeight - rect.bottom + 70) + 'px';
+      btn.style.right = (window.innerWidth - rect.right + 30) + 'px';
+    }, 50);
   }
 
   function unmountSkipButton() {
     const btn = document.getElementById('aniskip-float-btn');
     if (btn) btn.remove();
+    if (skipSyncInterval) clearInterval(skipSyncInterval);
     skipButtonMounted = false;
   }
+
+  let customSkipSyncInterval = null;
 
   function mountCustomSkipButton() {
     if (document.getElementById('shiinah-custom-hotzone')) return;
@@ -220,10 +234,10 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     btn.id = 'shiinah-custom-hotzone';
     
     Object.assign(btn.style, {
-      position: 'absolute', top: '10%', right: '5%', width: '160px', height: '100px',
+      position: 'fixed', width: '160px', height: '100px',
       backgroundColor: 'rgba(255, 255, 255, 0.01)', cursor: 'pointer', zIndex: '2147483647',
       borderRadius: '8px', display: 'none', transition: 'background-color 0.2s ease',
-      alignItems: 'center', justifyContent: 'center'
+      alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto'
     });
 
     const hoverText = document.createElement('span');
@@ -260,21 +274,29 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     btn.addEventListener('click', (e) => {
       e.stopPropagation(); 
       if (!trackedVideo) return;
-
       const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
       const skipAmount = isOP ? learnedSkipData.op : learnedSkipData.ed;
-
       trackedVideo.currentTime += skipAmount;
       showInPageToast('info', 'Custom Skip', `Skipped ${skipAmount}s using learned data!`);
-      
       hoverText.style.display = 'none';
       btn.style.display = 'none';
     });
 
-    const container = trackedVideo.parentElement;
-    if (window.getComputedStyle(container).position === 'static') container.style.position = 'relative';
+    const container = document.fullscreenElement || document.body;
     container.appendChild(btn);
     customSkipBtnMounted = true;
+
+    // Track the video position and mathematically pin the hotzone
+    if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
+    customSkipSyncInterval = setInterval(() => {
+      if (!trackedVideo) return;
+      const currentContainer = document.fullscreenElement || document.body;
+      if (btn.parentElement !== currentContainer) currentContainer.appendChild(btn);
+      
+      const rect = trackedVideo.getBoundingClientRect();
+      btn.style.top = (rect.top + (rect.height * 0.10)) + 'px';
+      btn.style.right = (window.innerWidth - rect.right + (rect.width * 0.05)) + 'px';
+    }, 50);
   }
 
   const trackerIntervalId = setInterval(() => {
@@ -425,13 +447,15 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
                   showInPageToast('info', 'OTG Resumed', `Jumped to ${mins}:${secs} successfully.`);
                 } catch (err) {}
               };
-              if (trackedVideo.readyState >= 1) executeSeek();
-              else {
+              if (trackedVideo.readyState >= 1) {
+                executeSeek();
+              } else {
                 trackedVideo.addEventListener('loadedmetadata', executeSeek, { once: true });
                 trackedVideo.addEventListener('canplay', executeSeek, { once: true });
               }
             }
-          } else if (response && response.otgTime === null && otgLoaded === 'fetching') {
+          // ✅ SURGICAL FIX: Prevent 'fetching' state from getting stuck if undefined
+          } else if (response && (response.otgTime === null || response.otgTime === undefined) && otgLoaded === 'fetching') {
             otgLoaded = true; 
           }
         }); 
@@ -586,7 +610,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
               showInPageToast('info', 'OTG Resumed', `Welcome back to Page ${response.otgTime}!`);
             }
           }
-        } else if (response && response.otgTime === null && mangaOtgLoaded === 'fetching') {
+        // ✅ SURGICAL FIX: Prevent 'fetching' state from getting stuck if undefined
+        } else if (response && (response.otgTime === null || response.otgTime === undefined) && mangaOtgLoaded === 'fetching') {
           mangaOtgLoaded = true; 
         }
       });
@@ -618,8 +643,33 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // 🍞 TOAST & MODAL UI SYSTEMS
   // ==========================================
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "SHOW_SUCCESS_TOAST") showInPageToast('success', 'Update Successful', request.message);
-    else if (request.action === "SKIP_TIME" && trackedVideo) trackedVideo.currentTime += request.amount;
+    if (request.action === "SHOW_SUCCESS_TOAST") {
+       showInPageToast('success', 'Update Successful', request.message);
+    }
+    // ✅ SMART SKIP ROUTER: Checks for exact data before defaulting to 90s
+    else if (request.action === "SMART_SKIP" && trackedVideo) {
+      let skipped = false;
+      const ct = trackedVideo.currentTime;
+      
+      if (aniSkipData && Array.isArray(aniSkipData)) {
+        const activeSkip = aniSkipData.find(skip => ct >= skip.interval.startTime && ct <= skip.interval.endTime);
+        if (activeSkip && activeSkip.interval.endTime) {
+          trackedVideo.currentTime = activeSkip.interval.endTime;
+          skipped = true;
+          showInPageToast('success', 'Skipped', activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!');
+        }
+      }
+      
+      if (!skipped) {
+        const isOP = ct < (trackedVideo.duration * 0.5);
+        const skipAmount = (aniSkipData === "not_found" && learnedSkipData) ? (isOP ? learnedSkipData.op : learnedSkipData.ed) : 90;
+        trackedVideo.currentTime += skipAmount;
+        showInPageToast('info', 'Skipped', `Skipped forward ${skipAmount} seconds.`);
+      }
+    }
+    else if (request.action === "SKIP_TIME" && trackedVideo) {
+      trackedVideo.currentTime += request.amount;
+    }
     else if (request.action === "SHOW_RATING_MODAL") showRatingModal(request.mediaId, request.animeName);
     else if (request.action === "GET_ACTIVE_SKIP_TIER") sendResponse({ tierText: activeSkipTier });
     return true; 
@@ -660,7 +710,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       </div>
     `;
 
-    document.body.appendChild(toast);
+    // ✅ SURGICAL FIX: Attach to fullscreen element so it isn't hidden behind the video player
+    const container = document.fullscreenElement || document.body;
+    container.appendChild(toast);
 
     const closeBtn = toast.querySelector('.toast-close-btn');
     closeBtn.addEventListener('mouseenter', () => closeBtn.firstElementChild.style.opacity = '1');
@@ -669,9 +721,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
     requestAnimationFrame(() => { setTimeout(() => { toast.style.right = '20px'; }, 100); });
     setTimeout(() => {
-      if (document.body.contains(toast)) {
+      if (container.contains(toast)) {
         toast.style.right = '-400px';
-        setTimeout(() => { if (document.body.contains(toast)) toast.remove(); }, 400);
+        setTimeout(() => { if (container.contains(toast)) toast.remove(); }, 400);
       }
     }, 5000); 
   }
