@@ -114,6 +114,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  const syncMalToAniBtn = document.getElementById('sync-mal-to-ani-btn');
+  if (syncMalToAniBtn) {
+    syncMalToAniBtn.addEventListener('click', () => {
+      const statusText = document.getElementById('sync-status-text');
+      syncMalToAniBtn.disabled = true;
+      syncMalToAniBtn.textContent = "Syncing...";
+      if (statusText) statusText.textContent = "Fetching lists & comparing data...";
+      chrome.runtime.sendMessage({ action: "SYNC_MAL_TO_ANI" });
+    });
+  }
+
   document.getElementById('back-btn').addEventListener('click', () => {
     document.getElementById('detail-view').classList.add('hidden');
     document.getElementById('main-view').classList.remove('hidden');
@@ -176,7 +187,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const modeBtn = document.getElementById('mode-toggle-btn');
   if (modeBtn) {
-    updateDropdownMenu();
     modeBtn.addEventListener('click', () => {
       currentMode = currentMode === 'ANIME' ? 'MANGA' : 'ANIME';
       modeBtn.textContent = currentMode === 'ANIME' ? '📺' : '📖';
@@ -363,11 +373,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ✅ SMART WHITELIST HANDLERS (Declared perfectly once)
+  // ✅ SMART WHITELIST HANDLERS
   const handleWhitelist = (type) => {
     const hostnameEl = document.getElementById('whitelist-hostname');
     if (!hostnameEl) return;
-    const hostname = hostnameEl.textContent;
+    const hostname = hostnameEl.textContent.trim();
 
     chrome.storage.local.get(['whitelistedDomains'], (result) => {
       let domains = result.whitelistedDomains || [];
@@ -400,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ✅ BULLETPROOF DOMAIN DETECTOR
+  // ✅ BULLETPROOF DOMAIN DETECTOR & ROUTER
   async function checkCurrentTabForAnime() {
     return new Promise((resolve) => {
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
@@ -452,47 +462,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
           const isWhitelisted = safeDomains.some(d => hostname.includes(d) || d.includes(hostname));
 
-          if (isWhitelisted) {
-             const matchedIndex = safeDomains.findIndex(d => hostname.includes(d) || d.includes(hostname));
-             const finalSearchType = matchedIndex !== -1 ? safeTypes[matchedIndex] : (detectedType || currentMode);
-
-             if (finalSearchType && finalSearchType !== currentMode) {
-                currentMode = finalSearchType;
-                chrome.storage.local.set({ currentMode: currentMode });
-                const modeBtn = document.getElementById('mode-toggle-btn');
-                if (modeBtn) modeBtn.textContent = currentMode === 'ANIME' ? '📺' : '📖';
-                currentFilter = currentMode === 'ANIME' ? 'SCHEDULE' : 'CURRENT';
-                const viewLabel = document.getElementById('current-view-label');
-                if (viewLabel) viewLabel.textContent = currentMode === 'ANIME' ? 'Schedule (My List) ▾' : 'Currently Reading ▾';
-                updateDropdownMenu();
-             }
-
-             if (detectedType || parsedTitle) {
-                 try {
-                     let media = await searchAnimeWithFallbacks(parsedTitle, finalSearchType);
-                     if (!media && finalSearchType === 'MANGA') {
-                       media = { id: -1, title: { romaji: parsedTitle || "Unknown Title", english: null }, coverImage: { medium: 'icons/icon128.png', large: 'icons/icon128.png' }, chapters: '?', mediaListEntry: null };
-                     }
-                     if (media) {
-                       detectedMedia = media;
-                       detectedEpisode = parsedProgress;
-                       showAutoDetectView(media, parsedProgress, finalSearchType);
-                       return resolve(true);
-                     }
-                 } catch (e) {}
-             }
-             return resolve(false);
+          // 1. IF SITE IS NOT WHITELISTED, FORCE THE PROMPT
+          if (!isWhitelisted) {
+              const isValidHost = hostname !== "unknown" && !hostname.includes("chrome") && !hostname.includes("google.");
+              if (isValidHost) {
+                  showWhitelistView(hostname);
+                  return resolve(true); 
+              } else {
+                  return resolve(false); 
+              }
           }
 
-          const keywordRegex = /anime|manga|manhwa|manhua|webtoon/i;
-          const isAnimeSite = keywordRegex.test(title) || keywordRegex.test(hostname);
-          const isValidHost = hostname !== "unknown" && !hostname.includes("chrome") && !hostname.includes("google.");
+          // 2. IF SITE IS WHITELISTED
+          const matchedIndex = safeDomains.findIndex(d => hostname.includes(d) || d.includes(hostname));
+          const finalSearchType = matchedIndex !== -1 ? safeTypes[matchedIndex] : (detectedType || currentMode);
 
-          if ((detectedType || isAnimeSite) && isValidHost) {
-              showWhitelistView(hostname);
-              return resolve(true);
+          // Smart Switch UI Mode
+          if (finalSearchType && finalSearchType !== currentMode) {
+             currentMode = finalSearchType;
+             chrome.storage.local.set({ currentMode: currentMode });
+             const modeBtn = document.getElementById('mode-toggle-btn');
+             if (modeBtn) modeBtn.textContent = currentMode === 'ANIME' ? '📺' : '📖';
+             currentFilter = currentMode === 'ANIME' ? 'SCHEDULE' : 'CURRENT';
+             const viewLabel = document.getElementById('current-view-label');
+             if (viewLabel) viewLabel.textContent = currentMode === 'ANIME' ? 'Schedule (My List) ▾' : 'Currently Reading ▾';
+             updateDropdownMenu();
           }
-          resolve(false);
+
+          if (detectedType || parsedTitle) {
+              try {
+                  let media = await searchAnimeWithFallbacks(parsedTitle, finalSearchType);
+                  if (!media && finalSearchType === 'MANGA') {
+                    media = { id: -1, title: { romaji: parsedTitle || "Unknown Title", english: null }, coverImage: { medium: 'icons/icon128.png', large: 'icons/icon128.png' }, chapters: '?', mediaListEntry: null };
+                  }
+                  if (media) {
+                    detectedMedia = media;
+                    detectedEpisode = parsedProgress;
+                    showAutoDetectView(media, parsedProgress, finalSearchType);
+                    return resolve(true);
+                  }
+              } catch (e) {}
+          }
+          
+          return resolve(false); // Whitelisted but no active media found, show list.
         });
       });
     });
@@ -604,7 +616,6 @@ function updateAuthUI(isLoggedIn) {
     if (loginView) loginView.classList.add('hidden');
     if (appView) appView.classList.remove('hidden');
     
-    // ✅ FORCE DEFAULT VIEW STATE: Show Main View, Hide Everything Else
     if (mainView) mainView.classList.remove('hidden');
     if (autodetectView) autodetectView.classList.add('hidden'); 
     if (settingsView) settingsView.classList.add('hidden');
@@ -616,7 +627,6 @@ function updateAuthUI(isLoggedIn) {
     if (detailView) detailView.classList.add('hidden');
   }
 }
-
 
 // ==========================================
 // 📡 API CORE & BOOTSTRAP
@@ -637,7 +647,6 @@ async function apiRequest(query, variables = {}) {
 
 async function initializeApp() {
   document.getElementById('anime-list').innerHTML = '';
-  
   const viewerQuery = `query { Viewer { id name avatar { medium } options { profileColor } } }`;
   
   try {
@@ -648,27 +657,17 @@ async function initializeApp() {
     document.getElementById('user-avatar').src = viewer.avatar.medium;
     document.getElementById('user-name').textContent = viewer.name;
 
-    const colorMap = {
-      "blue": "#3db4f2", "purple": "#c063ff", "pink": "#fc9dd6",
-      "orange": "#ef881a", "red": "#e13333", "green": "#4cca51", "gray": "#677b94"
-    };
+    const colorMap = { "blue": "#3db4f2", "purple": "#c063ff", "pink": "#fc9dd6", "orange": "#ef881a", "red": "#e13333", "green": "#4cca51", "gray": "#677b94" };
     const userColor = viewer.options?.profileColor;
     const hexColor = colorMap[userColor] || userColor || "#3db4f2";
     document.documentElement.style.setProperty('--anilist-color', hexColor);
 
-    chrome.storage.local.set({ 
-      anilistUserId: userId,
-      anilistUsername: viewer.name,
-      anilistAvatar: viewer.avatar.medium
-    });
+    chrome.storage.local.set({ anilistUserId: userId, anilistUsername: viewer.name, anilistAvatar: viewer.avatar.medium });
 
     chrome.storage.local.get(['equippedBadge'], (res) => {
       if (res.equippedBadge) {
         const badgeImg = document.getElementById('user-active-badge');
-        if(badgeImg) {
-          badgeImg.src = res.equippedBadge;
-          badgeImg.classList.remove('hidden');
-        }
+        if(badgeImg) { badgeImg.src = res.equippedBadge; badgeImg.classList.remove('hidden'); }
       }
     });
 
@@ -1073,17 +1072,15 @@ async function loadAnimeList(silent = false) {
   document.getElementById('search-input').classList.remove('hidden');
   
   const adView = document.getElementById('autodetect-view');
-  const wlView = document.getElementById('whitelist-view'); // ✅ Grab the whitelist view
+  const wlView = document.getElementById('whitelist-view'); 
   const setView = document.getElementById('settings-view');
   
   if (adView) adView.classList.add('hidden');
-  if (wlView) wlView.classList.add('hidden'); // ✅ Force it to hide
+  if (wlView) wlView.classList.add('hidden'); 
   if (setView) setView.classList.add('hidden');
 
   const filter = currentFilter; 
   let query, variables;
-  
-  // ... Keep the rest of your loadAnimeList code exactly the same ...
 
   const dayTabs = document.getElementById('day-tabs');
   if (filter === 'SCHEDULE' || filter === 'SCHEDULE_ALL') renderDayTabs(filter);
@@ -1180,15 +1177,6 @@ async function loadAnimeList(silent = false) {
   }
 }
 
-function formatCountdown(seconds) {
-  const d = Math.floor(seconds / (3600 * 24));
-  const h = Math.floor((seconds % (3600 * 24)) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
 function renderAnimeList(entries) {
   const visibleEntries = entries.filter(e => !hiddenMediaIds.includes(e.media.id));
   const container = document.getElementById('anime-list');
@@ -1268,127 +1256,6 @@ function renderAnimeList(entries) {
   });
 }
 
-// ==========================================
-// ✏️ UPDATING & DETAIL VIEWS
-// ==========================================
-
-function handleQuickPlusOneClick(entry, btnElement, progressTextElement) {
-  const media = entry.media;
-  const maxEpisodes = media.episodes || '?';
-  
-  entry.progress += 1;
-  btnElement.textContent = `+1`; 
-  if (progressTextElement) progressTextElement.textContent = `Ep: ${entry.progress} / ${maxEpisodes}`;
-
-  let newStatus = 'CURRENT';
-  let startedAt = undefined;
-  let completedAt = undefined;
-
-  if (entry.progress === 1) startedAt = getTodayFuzzy();
-  
-  if (maxEpisodes !== '?' && entry.progress >= maxEpisodes) {
-    entry.progress = maxEpisodes;
-    newStatus = 'COMPLETED';
-    completedAt = getTodayFuzzy();
-    btnElement.style.display = 'none'; 
-  }
-
-  clearTimeout(debounceTimers[media.id]);
-  
-  debounceTimers[media.id] = setTimeout(async () => {
-    btnElement.disabled = true;
-    const mutation = `
-      mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
-        SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id }
-      }
-    `;
-
-    const variables = { mediaId: media.id, progress: entry.progress, status: newStatus };
-    if (startedAt) variables.startedAt = startedAt;
-    if (completedAt) variables.completedAt = completedAt;
-
-    try {
-      const response = await apiRequest(mutation, variables);
-      if (response.errors) throw new Error(JSON.stringify(response.errors));
-      
-      btnElement.disabled = false;
-      loadAnimeList(true); 
-    } catch (error) {
-      btnElement.textContent = 'Error';
-      btnElement.disabled = false;
-    }
-  }, 800); 
-}
-
-async function quickUpdateStatus(mediaId, newStatus, btnElement) {
-  btnElement.textContent = '...';
-  btnElement.disabled = true;
-  const mutation = `mutation ($mediaId: Int, $status: MediaListStatus) { SaveMediaListEntry (mediaId: $mediaId, status: $status) { id } }`;
-  try {
-    const response = await apiRequest(mutation, { mediaId, status: newStatus });
-    if (response.errors) throw new Error(JSON.stringify(response.errors));
-    loadAnimeList(true); 
-  } catch (error) {
-    btnElement.textContent = 'Add';
-    btnElement.disabled = false;
-  }
-}
-
-function openDetailView(entry) {
-  currentSelectedAnime = entry;
-  const media = entry.media; 
-  
-  document.getElementById('detail-image').src = media.coverImage.large;
-  document.getElementById('anime-title').textContent = media.title.english || media.title.romaji;
-  
-  const synEl = document.getElementById('anime-synonyms');
-  if (media.synonyms && media.synonyms.length > 0) {
-    synEl.textContent = media.synonyms.slice(0, 3).join(', '); 
-    synEl.style.display = 'block';
-  } else {
-    synEl.style.display = 'none';
-  }
-  
-  const descEl = document.getElementById('anime-synopsis');
-  const readMoreBtn = document.getElementById('read-more-synopsis');
-  if (media.description) {
-    descEl.innerHTML = media.description; 
-    descEl.style.webkitLineClamp = '4';
-    readMoreBtn.style.display = 'block';
-    readMoreBtn.textContent = 'Read More';
-    
-    readMoreBtn.onclick = (e) => {
-      e.preventDefault();
-      if (descEl.style.webkitLineClamp === '4') {
-        descEl.style.webkitLineClamp = 'unset';
-        readMoreBtn.textContent = 'Show Less';
-      } else {
-        descEl.style.webkitLineClamp = '4';
-        readMoreBtn.textContent = 'Read More';
-      }
-    };
-  } else {
-    descEl.textContent = 'No synopsis available.';
-    readMoreBtn.style.display = 'none';
-  }
-
-  document.getElementById('episode-input').value = entry.progress || 0;
-  
-  const totalMax = currentMode === 'ANIME' ? (media.episodes || '?') : (media.chapters || '?');
-  document.getElementById('total-episodes').textContent = `/ ${totalMax}`;
-  document.getElementById('score-input').value = entry.score || '';
-  
-  const statusSelect = document.getElementById('status-select');
-  statusSelect.value = entry.status || 'CURRENT';
-
-  document.getElementById('main-view').classList.add('hidden');
-  document.getElementById('detail-view').classList.remove('hidden');
-  document.getElementById('save-btn').textContent = 'Save Update';
-  
-  const hideToggle = document.getElementById('hide-title-toggle');
-  if (hideToggle) hideToggle.checked = hiddenMediaIds.includes(media.id);
-}
-
 function handleEpisodeInput(e) {
   const currentVal = parseInt(e.target.value, 10);
   const maxEpisodes = currentSelectedAnime.media.episodes;
@@ -1447,10 +1314,6 @@ async function saveAnimeUpdate() {
     saveBtn.disabled = false;
   }
 }
-
-// ==========================================
-// 🚧 UNFINISHED (OTG) VIEW LOGIC
-// ==========================================
 
 async function loadUnfinishedList() {
   const container = document.getElementById('anime-list');
