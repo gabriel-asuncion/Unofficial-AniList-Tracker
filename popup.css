@@ -20,7 +20,7 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2b3a4a;
+  background: #4a627a; /* Lighter contrast color */
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
@@ -529,3 +529,34 @@ select, input {
   justify-content: flex-start;
   padding: 0 12px;
 }
+
+/* Custom Toggle Switch */
+.toggle-switch-container { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.toggle-label { font-size: 12px; color: #9fadbd; font-weight: bold; }
+.toggle-switch-container input { display: none; }
+.toggle-slider { position: relative; width: 36px; height: 20px; background-color: #2b3a4a; border-radius: 20px; transition: .3s; border: 1px solid #1a2636; }
+.toggle-slider:before { content: ""; position: absolute; height: 14px; width: 14px; left: 2px; bottom: 2px; background-color: #9fadbd; border-radius: 50%; transition: .3s; }
+.toggle-switch-container input:checked + .toggle-slider { background-color: #3db4f2; border-color: #3db4f2; }
+.toggle-switch-container input:checked + .toggle-slider:before { transform: translateX(16px); background-color: #fff; }
+
+/* Detail Form Input Cleanups */
+.update-form select, .update-form input {
+  background-color: #0b1119; color: #fff; border: 1px solid #1a2636;
+  padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box;
+  margin-top: 0; outline: none; transition: border-color 0.2s;
+}
+.update-form select:focus, .update-form input:focus { border-color: #3db4f2; }
+.update-form label { margin-bottom: 0; }
+
+/* Whitelist Manager Domain Toggle */
+.domain-type-toggle {
+  display: inline-flex; align-items: center; background: #1a2636; border-radius: 12px;
+  cursor: pointer; padding: 2px; width: 40px; position: relative; border: 1px solid #2b3a4a;
+  flex-shrink: 0; box-sizing: border-box; transition: background-color 0.3s;
+}
+.domain-type-indicator {
+  width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: bold; color: #fff; transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.domain-type-toggle.anime .domain-type-indicator { background: #3db4f2; transform: translateX(0); }
+.domain-type-toggle.manga .domain-type-indicator { background: #E5C07B; transform: translateX(18px); }

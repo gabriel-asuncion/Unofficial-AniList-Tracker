@@ -1,5 +1,7 @@
 // content.js - Unified Playback & Skip Engine
 
+let siteForcedType = null; 
+
 chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) => {
   const domains = result.whitelistedDomains || [];
   
@@ -10,29 +12,26 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     }
   }
 
-  const isWhitelisted = domains.some(d => hostsToCheck.some(h => h.includes(d)));
-  if (!isWhitelisted) return; 
+  const matchedDomain = domains.find(d => hostsToCheck.some(h => h.includes(typeof d === 'string' ? d : d.domain)));
+  if (!matchedDomain) return; 
+
+  siteForcedType = typeof matchedDomain === 'string' ? 'ANIME' : (matchedDomain.type || 'ANIME');
 
   // ==========================================
   // 🕸️ HLS NETWORK INTERCEPTOR
   // ==========================================
   let hlsSkipData = null;
 
-  // Inject the script into the main page environment
   const script = document.createElement('script');
   script.src = chrome.runtime.getURL('hls-interceptor.js');
-  script.onload = () => script.remove(); // Clean up after injection
+  script.onload = () => script.remove(); 
   (document.head || document.documentElement).appendChild(script);
 
-  // Listen for the interceptor finding an OP/ED in the m3u8 playlist
   window.addEventListener('message', (event) => {
     if (event.source !== window || !event.data) return;
     if (event.data.type === 'HLS_DISCONTINUITY_FOUND') {
       console.log("[HLS Analyzer]: Discontinuity OP/ED Found!", event.data.interval);
-      hlsSkipData = {
-        skipType: 'op', // Safely default to 'op' for styling
-        interval: event.data.interval
-      };
+      hlsSkipData = { skipType: 'op', interval: event.data.interval };
     }
   });
 
@@ -41,21 +40,22 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // ==========================================
   function getActiveMediaType() {
     const title = document.title || "";
+    const url = window.location.href || "";
     
-    // 1. Test for Anime
-    const animeRegex = /(?:Watch\s+)?(.*?)\s*(?:[-|—–:~]+\s*)?(?:Season\s*\d+\s*)?(?:Episode|Ep|EP|E)\.?\s*0*(\d+)/i;
+    const animeRegex = /(?:Watch\s+)?(.*?)\s*(?:[-|—–:~]+\s*)?(?:Season\s*\d+\s*)?\b(?:Episode|Ep)\b\.?\s*0*(\d+)/i;
     if (animeRegex.test(title)) return 'ANIME';
     
-    // 2. Test for Manga
-    const chapRegex = /(?:Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)/i;
+    const chapRegex = /\b(?:Chapter|Chap|Ch)\b\.?\s*0*(\d+(\.\d+)?)/i;
     const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
-    if (chapRegex.test(title) || looseRegex.test(title)) return 'MANGA';
+    if (chapRegex.test(title)) return 'MANGA';
     
-    // 3. Fallback: Video element presence
-    const videos = Array.from(document.querySelectorAll('video'));
-    if (videos.some(v => v.duration > 300 || isNaN(v.duration))) return 'ANIME';
+    const isMangaSite = /manga|manhwa|manhua|webtoon|comic|read/i.test(title) || /manga|manhwa|manhua|webtoon|comic|read/i.test(url) || siteForcedType === 'MANGA';
+    if (isMangaSite && looseRegex.test(title)) return 'MANGA';
     
-    return null;
+    const videos = getDeepVideos();
+    if (videos.some(v => !isNaN(v.duration) && v.duration > 100)) return 'ANIME';
+    
+    return siteForcedType; 
   }
 
   // ==========================================
@@ -91,7 +91,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
           j++;
         }
         
-        // Edge Case Filters: Ignore song lyrics and short sign cards
         const isSongLyric = /[♪♫]|<i>|<\/i>|<c\.lyrics>/i.test(text);
         const isShortSign = text.trim().split(/\s+/).length <= 2;
 
@@ -101,7 +100,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
     if (cues.length === 0) return null;
 
-    // Scan first half of episode (up to 12 mins) for ~90s low-dialogue window
     const maxSearchTime = Math.min(videoDuration * 0.5, 720);
     const windowDuration = 88; 
 
@@ -117,14 +115,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       ).length;
 
       if (dialogueCount <= 1) {
-        return {
-          found: true,
-          type: 'op',
-          interval: { startTime: windowStart, endTime: windowEnd }
-        };
+        return { found: true, type: 'op', interval: { startTime: windowStart, endTime: windowEnd } };
       }
     }
-
     return null;
   }
 
@@ -149,7 +142,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // ==========================================
   // 📺 ANIME TRACKING & PLAYBACK ENGINE
   // ==========================================
-  
   let activeWatchSeconds = 0;
   let hasTriggeredUpdate = false;
   let trackedVideo = null;
@@ -162,7 +154,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   let aniSkipData = null; 
   let activeSkipTier = "Detecting...";
   let skipButtonMounted = false;
-
   let customSkipBtnMounted = false;
   let learnedSkipData = { op: 85, ed: 85 };
   let manualSeekStart = 0;
@@ -171,7 +162,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     if (changes.trackingThreshold) userThreshold = changes.trackingThreshold.newValue;
   });
 
-  function getDeepVideos(root) {
+  function getDeepVideos(root = document) {
     let videos = Array.from(root.querySelectorAll('video'));
     let allElements = root.querySelectorAll('*');
     for (let el of allElements) {
@@ -325,27 +316,15 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       if (maxDuration > 300) {
         trackedVideo = longestVideo;
         
-        // Behavioral manual seek listener
         if (!trackedVideo.hasAttribute('data-seek-tracked')) {
           trackedVideo.setAttribute('data-seek-tracked', 'true');
-
-          trackedVideo.addEventListener('seeking', () => {
-            if (manualSeekStart === 0) manualSeekStart = trackedVideo.currentTime;
-          });
-
+          trackedVideo.addEventListener('seeking', () => { if (manualSeekStart === 0) manualSeekStart = trackedVideo.currentTime; });
           trackedVideo.addEventListener('seeked', () => {
             if (manualSeekStart > 0 && resolvedOtgData) {
               let diff = trackedVideo.currentTime - manualSeekStart;
-              
               if (diff > 70 && diff < 100) {
                 let isOP = manualSeekStart < (trackedVideo.duration * 0.5);
-                chrome.runtime.sendMessage({
-                  action: "SAVE_LEARNED_SKIP",
-                  mediaId: resolvedOtgData.mediaId,
-                  isOP: isOP,
-                  duration: diff
-                });
-                
+                chrome.runtime.sendMessage({ action: "SAVE_LEARNED_SKIP", mediaId: resolvedOtgData.mediaId, isOP: isOP, duration: diff });
                 if (isOP) learnedSkipData.op = Math.round(diff) - 1;
                 else learnedSkipData.ed = Math.round(diff) - 1;
               }
@@ -357,7 +336,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     }
 
     if (trackedVideo && !isNaN(trackedVideo.duration) && trackedVideo.duration > 0) {
-      
       if (trackedVideo.src !== currentVideoSrc) {
         currentVideoSrc = trackedVideo.src;
         hasTriggeredUpdate = false; 
@@ -368,19 +346,13 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         if (skipButtonMounted) unmountSkipButton(); 
       }
 
-      // Render Active Skip Button if timestamps exist
       if (aniSkipData && Array.isArray(aniSkipData)) {
         const ct = trackedVideo.currentTime;
         const activeSkip = aniSkipData.find(skip => ct >= skip.interval.startTime && ct <= skip.interval.endTime);
-
-        if (activeSkip) {
-          if (!skipButtonMounted) mountSkipButton(activeSkip);
-        } else {
-          if (skipButtonMounted) unmountSkipButton();
-        }
+        if (activeSkip) { if (!skipButtonMounted) mountSkipButton(activeSkip); } 
+        else { if (skipButtonMounted) unmountSkipButton(); }
       }
 
-      // Toggle Translucent Behavioral Hotzone
       if (customSkipBtnMounted && trackedVideo && aniSkipData === "not_found") {
         const customBtn = document.getElementById('shiinah-custom-hotzone');
         if (customBtn) {
@@ -415,42 +387,23 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
             if (!aniSkipData && resolvedOtgData.malId) {
               chrome.runtime.sendMessage({
-                action: "FETCH_ANISKIP",
-                malId: resolvedOtgData.malId,
-                episode: resolvedOtgData.episode
+                action: "FETCH_ANISKIP", malId: resolvedOtgData.malId, episode: resolvedOtgData.episode
               }, async (skipRes) => {
-                
-                // Tier 1: AniList / AniSkip Dataset
                 if (skipRes && skipRes.found && skipRes.results && skipRes.results.length > 0) {
                   aniSkipData = skipRes.results;
                   activeSkipTier = "Tier 1: AniSkip API";
                 } else {
-                  
-                  // Tier 2: Probe WebVTT Subtitle Files
                   const subResult = await fetchAndAnalyzeSubtitles(trackedVideo.duration);
                   if (subResult && subResult.found) {
-                    aniSkipData = [{
-                      skipType: subResult.type,
-                      interval: subResult.interval
-                    }];
+                    aniSkipData = [{ skipType: subResult.type, interval: subResult.interval }];
                     activeSkipTier = "Tier 2: Subtitles";
-                  } 
-                  
-                  // Tier 3: Probe HLS .m3u8 Interceptor Data
-                  else if (typeof hlsSkipData !== 'undefined' && hlsSkipData) {
+                  } else if (typeof hlsSkipData !== 'undefined' && hlsSkipData) {
                     aniSkipData = [hlsSkipData];
                     activeSkipTier = "Tier 3: HLS Intercept";
-                  } 
-                  
-                  // Tier 4: Fallback to Learned Behavioral Hotzone
-                  else {
+                  } else {
                     aniSkipData = "not_found"; 
                     activeSkipTier = "Tier 4: Learned Behavior";
-                    
-                    chrome.runtime.sendMessage({ 
-                      action: "GET_LEARNED_SKIP", 
-                      mediaId: resolvedOtgData.mediaId 
-                    }, (learnedRes) => {
+                    chrome.runtime.sendMessage({ action: "GET_LEARNED_SKIP", mediaId: resolvedOtgData.mediaId }, (learnedRes) => {
                       if (learnedRes) learnedSkipData = learnedRes;
                       if (!customSkipBtnMounted) mountCustomSkipButton();
                     });
@@ -460,11 +413,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
             }
           }
 
-          // OTG Seek Resumption
           if (response && response.otgTime !== undefined && response.otgTime !== null && otgLoaded === 'fetching') {
             otgLoaded = true;
             const targetTime = response.otgTime;
-
             if (targetTime > 5 && trackedVideo.currentTime < 15) {
               const executeSeek = () => {
                 try {
@@ -472,14 +423,10 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
                   const mins = Math.floor(targetTime / 60);
                   const secs = Math.floor(targetTime % 60).toString().padStart(2, '0');
                   showInPageToast('info', 'OTG Resumed', `Jumped to ${mins}:${secs} successfully.`);
-                } catch (err) {
-                  console.error("[OTG Seek Error]:", err);
-                }
+                } catch (err) {}
               };
-
-              if (trackedVideo.readyState >= 1) {
-                executeSeek();
-              } else {
+              if (trackedVideo.readyState >= 1) executeSeek();
+              else {
                 trackedVideo.addEventListener('loadedmetadata', executeSeek, { once: true });
                 trackedVideo.addEventListener('canplay', executeSeek, { once: true });
               }
@@ -492,7 +439,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         if (e.message.includes("Extension context invalidated")) clearInterval(trackerIntervalId);
       }
 
-      // Auto-update trigger at threshold
       if (trackedVideo.duration > 180 && trackedVideo.currentTime > 60 && (trackedVideo.currentTime / trackedVideo.duration) * 100 >= userThreshold && !hasTriggeredUpdate) {
         hasTriggeredUpdate = true;
         try {
@@ -505,7 +451,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // ==========================================
   // 📖 MANGA TRACKING ENGINE
   // ==========================================
-  
   let mangaWatchSeconds = 0;
   let hasTriggeredMangaUpdate = false;
   let currentMangaUrl = location.href;
@@ -517,11 +462,17 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   function cleanMangaTitle(rawTitle) {
     let chapter = null;
     let targetText = rawTitle;
+    const url = window.location.href || "";
     
-    const chapRegex = /(?:Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)/i;
+    const chapRegex = /\b(?:Chapter|Chap|Ch)\b\.?\s*0*(\d+(\.\d+)?)/i;
     const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
     
-    const chapMatch = rawTitle.match(chapRegex) || rawTitle.match(looseRegex);
+    let chapMatch = rawTitle.match(chapRegex);
+    
+    if (!chapMatch) {
+      const isMangaSite = /manga|manhwa|manhua|webtoon|comic|read/i.test(rawTitle) || /manga|manhwa|manhua|webtoon|comic|read/i.test(url);
+      if (isMangaSite) chapMatch = rawTitle.match(looseRegex);
+    }
     
     if (chapMatch) {
       chapter = parseFloat(chapMatch[1]);
@@ -538,7 +489,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     let clean = targetText.replace(/\b(?:Read|Watch|Free|English|Online|Scanlation|Scans|Scan|Manga|Manhwa|Manhua|Webtoon)\b/gi, '');
     clean = clean.replace(/\[.*?\]|\(.*?\)/g, '');
     clean = clean.replace(/^[-|—–:~,\|\s]+|[-|—–:~,\|\s]+$/g, '').replace(/\s{2,}/g, ' ').trim();
-
     return { title: clean, chapter: chapter };
   }
 
@@ -563,12 +513,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     const maxScroll = document.documentElement.scrollHeight - document.documentElement.clientHeight;
     const scrollPct = maxScroll > 0 ? (scrollPx / maxScroll) * 100 : 100;
 
-    if (document.visibilityState === 'visible') {
-      mangaWatchSeconds++;
-    }
+    if (document.visibilityState === 'visible') mangaWatchSeconds++;
 
     const parsedData = cleanMangaTitle(currentRawTitle);
-
     let readingType = 'fallback';
     let currentProg = 0;
     let totalProg = 0;
@@ -606,33 +553,21 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     try {
       chrome.runtime.sendMessage({
         action: "LIVE_MANGA_PROGRESS",
-        readingType: readingType,
-        progress: currentProg,
-        total: totalProg,
-        pct: visualPct,
-        isCompleted: hasTriggeredMangaUpdate,
-        isOtgLoaded: sendMangaOtgStatus,
-        parsedTitle: parsedData.title,
-        chapter: parsedData.chapter,
-        resolvedData: resolvedMangaOtgData
+        readingType: readingType, progress: currentProg, total: totalProg, pct: visualPct,
+        isCompleted: hasTriggeredMangaUpdate, isOtgLoaded: sendMangaOtgStatus,
+        parsedTitle: parsedData.title, chapter: parsedData.chapter, resolvedData: resolvedMangaOtgData
       }, (response) => {
         if (chrome.runtime.lastError) return;
         
         if (response && response.resolvedData) {
           resolvedMangaOtgData = response.resolvedData;
-          
           if (response.resolvedData.isCustom && mangaOtgLoaded === 'fetching') {
-            showInPageToast(
-              'warning', 
-              'Not on AniList', 
-              `"${response.resolvedData.customTitle}" was not found. Progress is securely saved locally to your OTG account!`
-            );
+            showInPageToast('warning', 'Not on AniList', `"${response.resolvedData.customTitle}" was not found. Progress is securely saved locally to your OTG account!`);
           }
         }
 
         if (response && response.otgTime !== undefined && response.otgTime !== null && mangaOtgLoaded === 'fetching') {
           mangaOtgLoaded = true;
-          
           if (readingType === 'scroll' && response.otgTime > 5) {
             const targetPct = response.otgTime;
             const targetScroll = maxScroll * (targetPct / 100);
@@ -659,7 +594,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
     if (!hasTriggeredMangaUpdate) {
       let shouldTrigger = false;
-
       if (readingType === 'page') {
         if (totalProg > 0 && currentProg >= totalProg) shouldTrigger = true;
         else if (totalProg === 0 && mangaWatchSeconds >= 15) shouldTrigger = true;
@@ -672,18 +606,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       if (shouldTrigger) {
         hasTriggeredMangaUpdate = true;
         const parsedData = cleanMangaTitle(currentRawTitle);
-        
         if (parsedData.title && parsedData.chapter !== null && parsedData.chapter !== lastTriggeredChapter) {
           lastTriggeredChapter = parsedData.chapter; 
-          
-          try {
-            chrome.runtime.sendMessage({ 
-              action: "AUTO_UPDATE_MANGA", 
-              cleanTitle: parsedData.title,
-              chapter: parsedData.chapter,
-              trueReadSeconds: mangaWatchSeconds 
-            }).catch(() => {});
-          } catch(e) {}
+          try { chrome.runtime.sendMessage({ action: "AUTO_UPDATE_MANGA", cleanTitle: parsedData.title, chapter: parsedData.chapter, trueReadSeconds: mangaWatchSeconds }).catch(() => {}); } catch(e) {}
         }
       }
     }
@@ -692,21 +617,11 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // ==========================================
   // 🍞 TOAST & MODAL UI SYSTEMS
   // ==========================================
-
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "SHOW_SUCCESS_TOAST") {
-      showInPageToast('success', 'Update Successful', request.message);
-    }
-    else if (request.action === "SKIP_TIME" && trackedVideo) {
-      trackedVideo.currentTime += request.amount;
-    }
-    else if (request.action === "SHOW_RATING_MODAL") {
-      showRatingModal(request.mediaId, request.animeName);
-    }
-    // --- NEW: DEV TIER REPORTER ---
-    else if (request.action === "GET_ACTIVE_SKIP_TIER") {
-      sendResponse({ tierText: activeSkipTier });
-    }
+    if (request.action === "SHOW_SUCCESS_TOAST") showInPageToast('success', 'Update Successful', request.message);
+    else if (request.action === "SKIP_TIME" && trackedVideo) trackedVideo.currentTime += request.amount;
+    else if (request.action === "SHOW_RATING_MODAL") showRatingModal(request.mediaId, request.animeName);
+    else if (request.action === "GET_ACTIVE_SKIP_TIER") sendResponse({ tierText: activeSkipTier });
     return true; 
   });
 
@@ -835,24 +750,15 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // ==========================================
   // 🏷️ SMART CARD-BASED DOM SCANNER & TOOLTIP
   // ==========================================
-
-  // Base64 Encoded Animated SVGs
   const SVG_UNLISTED = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>svg { overflow: visible; }@keyframes kf_pulse_1_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_1_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_1 { transform-origin: 0 0; animation: kf_pulse_1_transform_0 2s linear infinite, kf_pulse_1_stroke_0 2s linear infinite;}@keyframes kf_pulse_2_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  10% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  30% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_2_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_2 { transform-origin: 0 0; animation: kf_pulse_2_transform_0 2s linear infinite, kf_pulse_2_stroke_0 2s linear infinite;}@keyframes kf_pulse_3_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  40% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_3_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  40% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_3 { transform-origin: 0 0; animation: kf_pulse_3_transform_0 2s linear infinite, kf_pulse_3_stroke_0 2s linear infinite;}</style><g id="watchlist_no"><circle id="pulse_1" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_2" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_3" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="bg" cx="12" cy="12" r="12" fill="#FFD345"/><path id="i" transform="translate(9 4)" d="M3.648 3.744C2.976 3.744 2.472 3.592 2.136 3.288C1.8 2.968 1.632 2.528 1.632 1.968C1.632 1.408 1.848 0.944 2.28 0.576C2.728 0.192 3.28 0 3.936 0C4.528 0 5.008 0.144 5.376 0.432C5.744 0.72 5.928 1.128 5.928 1.656C5.928 2.296 5.72 2.808 5.304 3.192C4.888 3.56 4.336 3.744 3.648 3.744ZM1.344 16.632C0.832 16.632 0.48 16.528 0.288 16.32C0.096 16.112 0 15.784 0 15.336C0 15.208 0.016 14.984 0.048 14.664C0.304 11.736 0.728 9.072 1.32 6.672C1.448 6.176 1.656 5.832 1.944 5.64C2.248 5.432 2.728 5.328 3.384 5.328C4.072 5.328 4.416 5.608 4.416 6.168C4.416 6.248 4.4 6.4 4.368 6.624C3.648 10.048 3.216 12.92 3.072 15.24C3.04 15.752 2.888 16.112 2.616 16.32C2.344 16.528 1.92 16.632 1.344 16.632Z" fill="white"/></g></svg>`)}`;
   const SVG_YES = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>svg { overflow: visible; }@keyframes kf_pulse_1_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_1_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  10% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: rgba(76, 202, 81, 1); }  20% { stroke: rgba(76, 202, 81, 0); }  100% { stroke: rgba(76, 202, 81, 0); }}#pulse_1 { transform-origin: 0 0; animation: kf_pulse_1_transform_0 2s linear infinite, kf_pulse_1_stroke_0 2s linear infinite;}@keyframes kf_pulse_2_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  10% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  30% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_2_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #24A8DB; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  30% { stroke: rgba(76, 202, 81, 0); }  100% { stroke: rgba(76, 202, 81, 0); }}#pulse_2 { transform-origin: 0 0; animation: kf_pulse_2_transform_0 2s linear infinite, kf_pulse_2_stroke_0 2s linear infinite;}@keyframes kf_pulse_3_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  40% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_3_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #24A8DB; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  30% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  40% { stroke: rgba(76, 202, 81, 0); }  100% { stroke: rgba(76, 202, 81, 0); }}#pulse_3 { transform-origin: 0 0; animation: kf_pulse_3_transform_0 2s linear infinite, kf_pulse_3_stroke_0 2s linear infinite;}</style><g id="uptodate_yes"><circle id="pulse_1" cx="12" cy="12" r="11.5" stroke="#4CCA51"/><circle id="pulse_2" cx="12" cy="12" r="11.5" stroke="#24A8DB"/><circle id="pulse_3" cx="12" cy="12" r="11.5" stroke="#24A8DB"/><circle id="bg" cx="12" cy="12" r="12" fill="#4CCA51"/><path id="i" transform="translate(9 4)" d="M3.648 3.744C2.976 3.744 2.472 3.592 2.136 3.288C1.8 2.968 1.632 2.528 1.632 1.968C1.632 1.408 1.848 0.944 2.28 0.576C2.728 0.192 3.28 0 3.936 0C4.528 0 5.008 0.144 5.376 0.432C5.744 0.72 5.928 1.128 5.928 1.656C5.928 2.296 5.72 2.808 5.304 3.192C4.888 3.56 4.336 3.744 3.648 3.744ZM1.344 16.632C0.832 16.632 0.48 16.528 0.288 16.32C0.096 16.112 0 15.784 0 15.336C0 15.208 0.016 14.984 0.048 14.664C0.304 11.736 0.728 9.072 1.32 6.672C1.448 6.176 1.656 5.832 1.944 5.64C2.248 5.432 2.728 5.328 3.384 5.328C4.072 5.328 4.416 5.608 4.416 6.168C4.416 6.248 4.4 6.4 4.368 6.624C3.648 10.048 3.216 12.92 3.072 15.24C3.04 15.752 2.888 16.112 2.616 16.32C2.344 16.528 1.92 16.632 1.344 16.632Z" fill="white"/></g></svg>`)}`;
   const SVG_NO = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>svg { overflow: visible; }@keyframes kf_pulse_1_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_1_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #E74C3C; }  10% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #E74C3C; }  20% { stroke: rgba(231, 76, 60, 0); }  100% { stroke: rgba(231, 76, 60, 0); }}#pulse_1 { transform-origin: 0 0; animation: kf_pulse_1_transform_0 2s linear infinite, kf_pulse_1_stroke_0 2s linear infinite;}@keyframes kf_pulse_2_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  10% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  30% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_2_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #24A8DB; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #E74C3C; }  30% { stroke: rgba(231, 76, 60, 0); }  100% { stroke: rgba(231, 76, 60, 0); }}#pulse_2 { transform-origin: 0 0; animation: kf_pulse_2_transform_0 2s linear infinite, kf_pulse_2_stroke_0 2s linear infinite;}@keyframes kf_pulse_3_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  40% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_3_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #24A8DB; }  30% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #E74C3C; }  40% { stroke: rgba(231, 76, 60, 0); }  100% { stroke: rgba(231, 76, 60, 0); }}#pulse_3 { transform-origin: 0 0; animation: kf_pulse_3_transform_0 2s linear infinite, kf_pulse_3_stroke_0 2s linear infinite;}</style><g id="uptodate_no"><circle id="pulse_1" cx="12" cy="12" r="11.5" stroke="#E74C3C"/><circle id="pulse_2" cx="12" cy="12" r="11.5" stroke="#24A8DB"/><circle id="pulse_3" cx="12" cy="12" r="11.5" stroke="#24A8DB"/><circle id="bg" cx="12" cy="12" r="12" fill="#E74C3C"/><path id="i" transform="translate(9 4)" d="M3.648 3.744C2.976 3.744 2.472 3.592 2.136 3.288C1.8 2.968 1.632 2.528 1.632 1.968C1.632 1.408 1.848 0.944 2.28 0.576C2.728 0.192 3.28 0 3.936 0C4.528 0 5.008 0.144 5.376 0.432C5.744 0.72 5.928 1.128 5.928 1.656C5.928 2.296 5.72 2.808 5.304 3.192C4.888 3.56 4.336 3.744 3.648 3.744ZM1.344 16.632C0.832 16.632 0.48 16.528 0.288 16.32C0.096 16.112 0 15.784 0 15.336C0 15.208 0.016 14.984 0.048 14.664C0.304 11.736 0.728 9.072 1.32 6.672C1.448 6.176 1.656 5.832 1.944 5.64C2.248 5.432 2.728 5.328 3.384 5.328C4.072 5.328 4.416 5.608 4.416 6.168C4.416 6.248 4.4 6.4 4.368 6.624C3.648 10.048 3.216 12.92 3.072 15.24C3.04 15.752 2.888 16.112 2.616 16.32C2.344 16.528 1.92 16.632 1.344 16.632Z" fill="white"/></g></svg>`)}`;
 
-  // Strict normalizer removes non-alphanumeric characters & trailing dots/ellipses
   function normalizeTitle(title) {
     if (!title) return "";
-    return title
-      .toLowerCase()
-      .replace(/\.{2,}/g, '') 
-      .replace(/[^\w\s]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    return title.toLowerCase().replace(/\.{2,}/g, '').replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
   }
 
-  // Exact UI words to exclude from title tagging
   const IGNORE_UI_WORDS = new Set([
     'schedule', 'latest', 'popular', 'shows', 'trending', 'this season', 'season',
     'ona', 'tv', 'movie', 'episodes', 'recently', 'released', 'home', 'browse',
@@ -862,7 +768,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     'thu', 'fri', 'sat', 'sun'
   ]);
 
-  // FIX: Make this a positive check instead of a negative check to avoid empty string bugs
   function isValidTitle(normText) {
     if (!normText || normText.length < 3) return false;
     return !IGNORE_UI_WORDS.has(normText);
@@ -871,7 +776,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   function isTitleMatch(normRaw, normTarget) {
     if (!normRaw || !normTarget) return false;
     if (normRaw === normTarget) return true;
-    // Handle truncated on-screen titles
     if (normRaw.length >= 4 && normTarget.startsWith(normRaw)) return true;
     if (normTarget.length >= 4 && normRaw.startsWith(normTarget)) return true;
     return false;
@@ -882,13 +786,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     if (card.parentElement && card.parentElement.closest('[data-shiinah-scanned="true"]')) return;
 
     let titleEl = card.querySelector('.line-clamp-1, .line-clamp-2, a.font-semibold, h1, h2, h3, h4, h5, .title, .series-title, .anime-title, .manga-title');
-    
-    if (!titleEl && card.tagName !== 'A') {
-       titleEl = card.querySelector('a[href*="/anime/"], a[href*="/series/"], a[href*="/manga/"], a[href*="/chapter/"]');
-    }
-    if (!titleEl && card.tagName === 'A') {
-       titleEl = card;
-    }
+    if (!titleEl && card.tagName !== 'A') titleEl = card.querySelector('a[href*="/anime/"], a[href*="/series/"], a[href*="/manga/"], a[href*="/chapter/"]');
+    if (!titleEl && card.tagName === 'A') titleEl = card;
 
     let rawText = titleEl ? (titleEl.textContent || '').trim() : '';
     const imgEl = card.querySelector('img');
@@ -897,36 +796,25 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     const normRawText = normalizeTitle(rawText);
     const normAltText = normalizeTitle(altText);
 
-    const validRaw = isValidTitle(normRawText);
-    const validAlt = isValidTitle(normAltText);
-
-    if (!validRaw && !validAlt) return;
+    if (!isValidTitle(normRawText) && !isValidTitle(normAltText)) return;
 
     card.setAttribute('data-shiinah-scanned', 'true');
-    const displayTitle = validRaw ? rawText : altText;
+    const displayTitle = isValidTitle(normRawText) ? rawText : altText;
 
     const match = watchlist.find(entry => {
       const normEng = normalizeTitle(entry.media?.title?.english);
       const normRom = normalizeTitle(entry.media?.title?.romaji);
-      
       let isMatch = false;
-      if (validRaw) {
-         isMatch = isMatch || isTitleMatch(normRawText, normEng) || isTitleMatch(normRawText, normRom);
-      }
-      if (validAlt) {
-         isMatch = isMatch || isTitleMatch(normAltText, normEng) || isTitleMatch(normAltText, normRom);
-      }
+      if (isValidTitle(normRawText)) isMatch = isMatch || isTitleMatch(normRawText, normEng) || isTitleMatch(normRawText, normRom);
+      if (isValidTitle(normAltText)) isMatch = isMatch || isTitleMatch(normAltText, normEng) || isTitleMatch(normAltText, normRom);
       return isMatch;
     });
 
     const style = window.getComputedStyle(card);
     if (style.position === 'static') card.style.position = 'relative';
 
-    if (match) {
-      injectInteractiveBadge(card, match, true, displayTitle);
-    } else {
-      injectInteractiveBadge(card, { media: { title: { romaji: displayTitle } } }, false, displayTitle);
-    }
+    if (match) injectInteractiveBadge(card, match, true, displayTitle);
+    else injectInteractiveBadge(card, { media: { title: { romaji: displayTitle } } }, false, displayTitle);
   }
 
   function formatStatusLabel(status) {
@@ -944,76 +832,33 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   function injectInteractiveBadge(targetEl, entry, isWatchlisted, rawText) {
     const media = entry.media;
     const currentProgress = entry.progress || 0;
-    
     const isManga = media.chapters !== undefined || media.format === 'MANGA' || media.format === 'NOVEL';
     const unitLabel = isManga ? 'Ch' : 'Ep';
 
     let latestCount = media.episodes || media.chapters || '?';
-    if (media.nextAiringEpisode) {
-      latestCount = media.nextAiringEpisode.episode - 1;
-    }
-
+    if (media.nextAiringEpisode) latestCount = media.nextAiringEpisode.episode - 1;
     const isUpToDate = latestCount !== '?' && currentProgress >= latestCount;
     
     let activeSvg, themeColor;
-    if (!isWatchlisted) {
-      activeSvg = SVG_UNLISTED;
-      themeColor = '#FFD345';
-    } else if (isUpToDate) {
-      activeSvg = SVG_YES;
-      themeColor = '#4cca51';
-    } else {
-      activeSvg = SVG_NO;
-      themeColor = '#e74c3c';
-    }
+    if (!isWatchlisted) { activeSvg = SVG_UNLISTED; themeColor = '#FFD345'; } 
+    else if (isUpToDate) { activeSvg = SVG_YES; themeColor = '#4cca51'; } 
+    else { activeSvg = SVG_NO; themeColor = '#e74c3c'; }
 
     const badgeWrapper = document.createElement('span');
     badgeWrapper.className = 'shiinah-inline-badge';
-    Object.assign(badgeWrapper.style, {
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      position: 'absolute', 
-      top: '8px',
-      right: '8px',
-      cursor: 'pointer',
-      zIndex: '2147483640',
-      flexShrink: '0'
-    });
-
+    Object.assign(badgeWrapper.style, { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', position: 'absolute', top: '8px', right: '8px', cursor: 'pointer', zIndex: '2147483640', flexShrink: '0' });
     badgeWrapper.innerHTML = `<img src="${activeSvg}" style="width: 22px; height: 22px; pointer-events: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));">`;
     targetEl.appendChild(badgeWrapper);
 
     const tooltip = document.createElement('div');
-    tooltip.className = 'shiinah-tooltip-container'; 
-    tooltip._linkedBadge = badgeWrapper; 
-    
-    Object.assign(tooltip.style, {
-      position: 'fixed', 
-      width: '290px',
-      padding: '16px',
-      backgroundColor: '#0b1119',
-      border: `1px solid ${themeColor}`,
-      borderRadius: '12px',
-      boxShadow: '0 10px 30px rgba(0,0,0,0.9)',
-      display: 'none',
-      flexDirection: 'column',
-      gap: '12px',
-      zIndex: '2147483647',
-      pointerEvents: 'auto',
-      fontFamily: 'system-ui, sans-serif',
-      color: '#fff',
-      cursor: 'default' 
-    });
+    tooltip.className = 'shiinah-tooltip-container'; tooltip._linkedBadge = badgeWrapper; 
+    Object.assign(tooltip.style, { position: 'fixed', width: '290px', padding: '16px', backgroundColor: '#0b1119', border: `1px solid ${themeColor}`, borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.9)', display: 'none', flexDirection: 'column', gap: '12px', zIndex: '2147483647', pointerEvents: 'auto', fontFamily: 'system-ui, sans-serif', color: '#fff', cursor: 'default' });
 
     const bridge = document.createElement('div');
     bridge.style.cssText = 'position: absolute; bottom: -15px; left: 0; width: 100%; height: 15px; background: transparent;';
     tooltip.appendChild(bridge);
 
-    badgeWrapper.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    });
+    badgeWrapper.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
 
     const headerHtml = isWatchlisted 
       ? `
@@ -1021,12 +866,13 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         <div style="font-size: 22px; color: #fff; font-weight: 900; text-align: center; letter-spacing: 1px; margin-bottom: 4px;">
           <span style="color: ${themeColor};">${currentProgress}</span> / <span style="color: #677b94;">${latestCount}</span>
         </div>
-        <div class="shiinah-media-status" style="font-size: 11px; color: #E5C07B; text-align: center; font-weight: bold;"></div>
+        <div class="shiinah-media-status" style="font-size: 11px; color: #E5C07B; text-align: center; font-weight: bold; margin-bottom: 10px;"></div>
+        <div class="shiinah-view-links" style="display: flex; gap: 8px; width: 100%;"></div>
       ` 
       : `
         <div style="font-size: 11px; color: #9fadbd; font-weight: bold; text-align: center; letter-spacing: 0.5px;">STATUS</div>
         <div style="font-size: 16px; color: #FFD345; font-weight: bold; text-align: center; margin-bottom: 8px;">Not in List</div>
-        <button class="shiinah-add-btn" style="display: none; margin-bottom: 8px; background: #3db4f2; color: #fff; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; transition: 0.2s;">+ Add Entry</button>
+        <div class="shiinah-add-btn-container" style="display: none; gap: 8px; margin-bottom: 8px; width: 100%;"></div>
       `;
 
     tooltip.innerHTML = `
@@ -1065,7 +911,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       scores.forEach((scoreObj) => {
         const heightPct = maxAmount > 0 ? Math.max((scoreObj.amount / maxAmount) * 100, 6) : 6;
         const barColor = colorScale[Math.min(Math.floor((scoreObj.score - 10) / 10), 9)] || '#4cca51';
-        
         barsHtml += `
           <div style="display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; min-width: 18px;">
             <div style="font-size: 8px; color: #9fadbd; height: 14px; display: flex; align-items: flex-end;">${scoreObj.amount > 999 ? (scoreObj.amount/1000).toFixed(1)+'k' : scoreObj.amount}</div>
@@ -1076,24 +921,13 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
           </div>
         `;
       });
-
-      statsBody.innerHTML = `
-        <div style="font-size: 11px; color: #9fadbd; font-weight: bold; margin-bottom: 6px; text-transform: uppercase;">SCORE DISTRIBUTION (${platformKey.toUpperCase()})</div>
-        <div style="display: flex; align-items: flex-end; justify-content: space-between; height: 80px; border-bottom: 1px solid #2b3a4a; padding-bottom: 2px;">
-          ${barsHtml}
-        </div>
-      `;
+      statsBody.innerHTML = `<div style="font-size: 11px; color: #9fadbd; font-weight: bold; margin-bottom: 6px; text-transform: uppercase;">SCORE DISTRIBUTION (${platformKey.toUpperCase()})</div><div style="display: flex; align-items: flex-end; justify-content: space-between; height: 80px; border-bottom: 1px solid #2b3a4a; padding-bottom: 2px;">${barsHtml}</div>`;
     }
 
     tooltip.querySelectorAll('.shiinah-stat-tab').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        tooltip.querySelectorAll('.shiinah-stat-tab').forEach(b => {
-          b.style.background = '#1a2636';
-          b.style.color = '#9fadbd';
-        });
+        e.preventDefault(); e.stopPropagation();
+        tooltip.querySelectorAll('.shiinah-stat-tab').forEach(b => { b.style.background = '#1a2636'; b.style.color = '#9fadbd'; });
         btn.style.background = btn.getAttribute('data-platform') === 'al' ? '#3db4f2' : '#2E51A2'; 
         btn.style.color = '#fff';
         currentPlatform = btn.getAttribute('data-platform');
@@ -1111,118 +945,141 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       const rect = badgeWrapper.getBoundingClientRect();
       let top = rect.top - tooltip.offsetHeight - 15;
       let left = rect.left + (rect.width / 2) - (tooltip.offsetWidth / 2);
-
       if (left < 10) left = 10;
       if (left + tooltip.offsetWidth > window.innerWidth - 10) left = window.innerWidth - tooltip.offsetWidth - 10;
       if (top < 10) top = rect.bottom + 15; 
-
-      tooltip.style.top = `${top}px`;
-      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`; tooltip.style.left = `${left}px`;
 
       if (!cachedStats) {
         clearTimeout(fetchIntentTimeout);
-        fetchIntentTimeout = setTimeout(() => {
+        fetchIntentTimeout = setTimeout(async () => {
           try {
             if (!chrome.runtime?.id) return;
+            const urlStr = window.location.href.toLowerCase();
+            const textStr = rawText.toLowerCase();
+            const hrefStr = (targetEl.tagName === 'A' ? targetEl.getAttribute('href') : targetEl.querySelector('a')?.getAttribute('href')) || '';
+            const isMangaCard = urlStr.includes('manga') || urlStr.includes('read') || targetEl.closest('.manga-card') || hrefStr.includes('/manga/') || hrefStr.includes('/chapter/') || /\b(chapter|ch\.|vol|manga|webtoon|manhwa)\b/i.test(textStr);
+            const isAnimeCard = urlStr.includes('anime') || urlStr.includes('watch') || targetEl.closest('.anime-card') || hrefStr.includes('/anime/') || hrefStr.includes('/episode/') || hrefStr.includes('/series/') || /\b(season|ep|episode|ova|movie)\b/i.test(textStr);
             
-            const actionName = isWatchlisted ? "FETCH_MEDIA_STATS" : "SEARCH_AND_FETCH_STATS";
-            
-            // FIX: Intelligently determine the Media Type based on the site or card!
-            const isMangaSite = window.location.href.includes('manga') || window.location.href.includes('read') || targetEl.closest('.manga-card') || targetEl.querySelector('a[href*="/manga/"], a[href*="/chapter/"]');
-            const mediaType = (entry.media && entry.media.format === 'MANGA') ? 'MANGA' : (isMangaSite ? 'MANGA' : 'ANIME');
-
-            const payload = isWatchlisted 
-              ? { action: actionName, mediaId: media.id, malId: media.idMal, mediaType: mediaType }
-              : { action: actionName, title: rawText, mediaType: mediaType };
-
-            chrome.runtime.sendMessage(payload, (res) => {
-              cachedStats = res?.stats || { al: null, mal: null, meta: null };
-              renderChart(currentPlatform);
-
-              if (!isWatchlisted && res?.media?.id) {
-                const addBtn = tooltip.querySelector('.shiinah-add-btn');
-                if (addBtn) {
-                  addBtn.style.display = 'block';
-                  addBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    addBtn.textContent = 'Adding...';
-                    
-                    // FIX: Pass the mediaType and malId down to the background!
-                    chrome.runtime.sendMessage({ 
-                      action: "ADD_TO_WATCHLIST", 
-                      mediaId: res.media.id,
-                      malId: res.media.idMal,
-                      mediaType: mediaType 
-                    }, (addRes) => {
-                      if (addRes?.success) {
-                        addBtn.textContent = 'Added! ✓';
-                        addBtn.style.background = '#4cca51';
-                      } else {
-                        addBtn.textContent = 'Error';
-                        addBtn.style.background = '#e74c3c';
-                      }
-                    });
-                  });
+            if (isWatchlisted) {
+              const mediaType = (entry.media && entry.media.format === 'MANGA') ? 'MANGA' : (isMangaCard ? 'MANGA' : 'ANIME');
+              chrome.runtime.sendMessage({ action: "FETCH_MEDIA_STATS", mediaId: media.id, malId: media.idMal, mediaType: mediaType }, (res) => {
+                cachedStats = res?.stats || { al: null, mal: null, meta: null };
+                renderChart(currentPlatform);
+              });
+              const linkContainer = tooltip.querySelector('.shiinah-view-links');
+              if (linkContainer && !linkContainer.hasChildNodes()) {
+                if (media.id > 0 && !media.isMalOnly) {
+                  const alLink = document.createElement('a'); alLink.textContent = 'View in AL'; alLink.href = `https://anilist.co/${mediaType.toLowerCase()}/${media.id}`; alLink.target = '_blank';
+                  Object.assign(alLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#3db4f2', border: '1px solid #3db4f2', padding: '6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
+                  alLink.onmouseenter = () => { alLink.style.background = '#3db4f2'; alLink.style.color = '#fff'; }; alLink.onmouseleave = () => { alLink.style.background = 'transparent'; alLink.style.color = '#3db4f2'; };
+                  alLink.onclick = (e) => e.stopPropagation();
+                  linkContainer.appendChild(alLink);
+                }
+                if (media.idMal || media.isMalOnly) {
+                  const malLink = document.createElement('a'); malLink.textContent = 'View in MAL';
+                  malLink.href = `https://myanimelist.net/${mediaType.toLowerCase()}/${media.isMalOnly ? media.idMal : media.idMal}`; malLink.target = '_blank';
+                  Object.assign(malLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#5C7CE5', border: '1px solid #2E51A2', padding: '6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
+                  malLink.onmouseenter = () => { malLink.style.background = '#2E51A2'; malLink.style.color = '#fff'; }; malLink.onmouseleave = () => { malLink.style.background = 'transparent'; malLink.style.color = '#5C7CE5'; };
+                  malLink.onclick = (e) => e.stopPropagation();
+                  linkContainer.appendChild(malLink);
                 }
               }
-            });
-          } catch(e) {
-            console.log("[Shiinah] Fetch Intent Error:", e);
-          }
+            } else {
+              const fetchMedia = (type) => new Promise(resolve => chrome.runtime.sendMessage({ action: "SEARCH_AND_FETCH_STATS", title: rawText, mediaType: type }, resolve));
+              let animeRes = null; let mangaRes = null;
+              if (isAnimeCard && !isMangaCard) animeRes = await fetchMedia('ANIME');
+              else if (isMangaCard && !isAnimeCard) mangaRes = await fetchMedia('MANGA');
+              else [animeRes, mangaRes] = await Promise.all([fetchMedia('ANIME'), fetchMedia('MANGA')]);
+
+              const primaryRes = isMangaCard ? (mangaRes?.media ? mangaRes : animeRes) : (animeRes?.media ? animeRes : mangaRes);
+              cachedStats = primaryRes?.stats || { al: null, mal: null, meta: null };
+              renderChart(currentPlatform);
+
+              const btnContainer = tooltip.querySelector('.shiinah-add-btn-container');
+              if (btnContainer && (animeRes?.media?.id || mangaRes?.media?.id)) {
+                btnContainer.innerHTML = ''; btnContainer.style.display = 'flex';
+                const createBtnGroup = (mediaData, type) => {
+                  if (!mediaData || !mediaData.id) return null;
+                  const group = document.createElement('div');
+                  Object.assign(group.style, { display: 'flex', flexDirection: 'column', gap: '4px', flex: '1', minWidth: '0' });
+                  const platforms = [];
+                  if (mediaData.id > 0 && !mediaData.isMalOnly) platforms.push('AL');
+                  if (mediaData.idMal || mediaData.isMalOnly) platforms.push('MAL');
+                  const platStr = platforms.length > 0 ? ` [${platforms.join('/')}]` : '';
+
+                  const btn = document.createElement('button'); btn.textContent = `+ ${type === 'MANGA' ? 'Manga' : 'Anime'}${platStr}`;
+                  Object.assign(btn.style, { width: '100%', background: '#3db4f2', color: '#fff', border: 'none', padding: '8px 4px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px', transition: '0.2s', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
+                  btn.addEventListener('mouseenter', () => btn.style.background = '#2c9ad1'); btn.addEventListener('mouseleave', () => btn.style.background = '#3db4f2');
+                  btn.addEventListener('click', (e) => {
+                    e.preventDefault(); e.stopPropagation(); btn.textContent = 'Adding...';
+                    chrome.runtime.sendMessage({ action: "ADD_TO_WATCHLIST", mediaId: mediaData.id, malId: mediaData.idMal, mediaType: type }, (addRes) => {
+                      if (addRes?.success) { btn.textContent = 'Added! ✓'; btn.style.background = '#4cca51'; } else { btn.textContent = 'Error'; btn.style.background = '#e74c3c'; }
+                    });
+                  });
+                  group.appendChild(btn);
+
+                  const linksRow = document.createElement('div');
+                  Object.assign(linksRow.style, { display: 'flex', gap: '4px', width: '100%' });
+
+                  if (mediaData.id > 0 && !mediaData.isMalOnly) {
+                    const alLink = document.createElement('a'); alLink.textContent = 'View in AL'; alLink.href = `https://anilist.co/${type.toLowerCase()}/${mediaData.id}`; alLink.target = '_blank';
+                    Object.assign(alLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#3db4f2', border: '1px solid #3db4f2', padding: '4px 0', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
+                    alLink.onmouseenter = () => { alLink.style.background = '#3db4f2'; alLink.style.color = '#fff'; }; alLink.onmouseleave = () => { alLink.style.background = 'transparent'; alLink.style.color = '#3db4f2'; }; alLink.onclick = (e) => e.stopPropagation();
+                    linksRow.appendChild(alLink);
+                  }
+
+                  if (mediaData.idMal || mediaData.isMalOnly) {
+                    const malLink = document.createElement('a'); malLink.textContent = 'View in MAL'; malLink.href = `https://myanimelist.net/${type.toLowerCase()}/${mediaData.isMalOnly ? mediaData.idMal : mediaData.idMal}`; malLink.target = '_blank';
+                    Object.assign(malLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#5C7CE5', border: '1px solid #2E51A2', padding: '4px 0', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
+                    malLink.onmouseenter = () => { malLink.style.background = '#2E51A2'; malLink.style.color = '#fff'; }; malLink.onmouseleave = () => { malLink.style.background = 'transparent'; malLink.style.color = '#5C7CE5'; }; malLink.onclick = (e) => e.stopPropagation();
+                    linksRow.appendChild(malLink);
+                  }
+
+                  group.appendChild(linksRow); return group;
+                };
+
+                const animeGroup = createBtnGroup(animeRes?.media, 'ANIME');
+                const mangaGroup = createBtnGroup(mangaRes?.media, 'MANGA');
+                if (animeGroup) btnContainer.appendChild(animeGroup);
+                if (mangaGroup) btnContainer.appendChild(mangaGroup);
+              }
+            }
+          } catch(e) { console.log("[Shiinah] Fetch Intent Error:", e); }
         }, 300); 
       }
     };
 
-    const scheduleHide = () => {
-      clearTimeout(fetchIntentTimeout);
-      hideTimeout = setTimeout(() => {
-        tooltip.style.display = 'none';
-      }, 250); 
-    };
-
+    const scheduleHide = () => { clearTimeout(fetchIntentTimeout); hideTimeout = setTimeout(() => { tooltip.style.display = 'none'; }, 250); };
     badgeWrapper.addEventListener('mouseenter', showTooltip);
     badgeWrapper.addEventListener('mouseleave', scheduleHide);
     tooltip.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
     tooltip.addEventListener('mouseleave', scheduleHide);
   }
 
-  // --- SMART SCANNER ENGINE ---
   let shiinahScannerInterval = null;
   let cachedWatchlist = [];
 
   function initSmartTracker() {
     if (!chrome || !chrome.runtime || !chrome.runtime.id) return;
-
     chrome.runtime.sendMessage({ action: "GET_USER_WATCHLIST" }, (response) => {
       if (chrome.runtime.lastError || !response || !response.watchlist) return;
       cachedWatchlist = response.watchlist;
-
       const cardSelectors = '[data-slot="card"], .anime-card, .series-card, .manga-card, .card, [class*="card"], a[href*="/anime/"], a[href*="/series/"], a[href*="/manga/"], a[href*="/chapter/"], a[href*="/watch/"]';
       
       const scanDOM = () => {
-        if (!chrome.runtime?.id) {
-          clearInterval(shiinahScannerInterval);
-          return;
-        }
-
+        if (!chrome.runtime?.id) { clearInterval(shiinahScannerInterval); return; }
         document.querySelectorAll(cardSelectors).forEach(card => {
            if (card.tagName === 'A' && card.childElementCount === 0) return;
            processAnimeCard(card, cachedWatchlist);
         });
-
         document.querySelectorAll('.shiinah-tooltip-container').forEach(tooltip => {
-          if (tooltip._linkedBadge && !document.body.contains(tooltip._linkedBadge)) {
-            tooltip.remove();
-          }
+          if (tooltip._linkedBadge && !document.body.contains(tooltip._linkedBadge)) tooltip.remove();
         });
       };
 
       scanDOM();
-
-      if (!shiinahScannerInterval) {
-        shiinahScannerInterval = setInterval(scanDOM, 2500);
-      }
+      if (!shiinahScannerInterval) shiinahScannerInterval = setInterval(scanDOM, 2500);
     });
   }
   

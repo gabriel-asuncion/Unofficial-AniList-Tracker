@@ -80,15 +80,20 @@
 
     <!-- 2. WHITELIST VIEW -->
     <div id="whitelist-view" class="hidden">
-      <h3 class="autodetect-header">Enable Auto-Tracking?</h3>
-      <div class="autodetect-card" style="flex-direction: column; text-align: center; gap: 8px;">
-        <p style="font-size: 13px; margin: 0; color: #ffffff;">We noticed you are watching anime on</p>
-        <p style="font-size: 14px; margin: 0; color: #E5C07B; font-weight: bold;" id="whitelist-hostname"></p>
-        <p style="font-size: 11px; margin: 5px 0 0 0; opacity: 0.8;">Whitelist this site to enable auto-tracking.</p>
+      <!-- ✅ Added Yellow Warning Badge & Centered Layout -->
+      <h3 class="autodetect-header" style="color: #E5C07B; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        <span style="background: #E5C07B; color: #0b1119; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 900;">!</span>
+        Action Required
+      </h3>
+      <div class="autodetect-card" style="flex-direction: column; text-align: center; gap: 8px; border-color: #E5C07B;">
+        <p style="font-size: 13px; margin: 0; color: #ffffff;">We noticed you are on</p>
+        <p style="font-size: 15px; margin: 0; color: #E5C07B; font-weight: bold;" id="whitelist-hostname"></p>
+        <p style="font-size: 11px; margin: 5px 0 0 0; opacity: 0.8;">Whitelist this site to enable background tracking.</p>
       </div>
-      <div class="autodetect-actions" style="margin-top: 15px;">
-        <button id="whitelist-confirm-btn" class="primary-btn">Whitelist & Reload</button>
-        <button id="whitelist-cancel-btn" class="secondary-btn">Skip for now</button>
+      <div class="autodetect-actions" style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
+        <button id="whitelist-anime-btn" class="primary-btn" style="background-color: #3db4f2;">Whitelist as Anime Streaming Site</button>
+        <button id="whitelist-manga-btn" class="primary-btn" style="background-color: #3db4f2;">Whitelist as Manga Reading Site</button>
+        <button id="whitelist-cancel-btn" class="secondary-btn" style="margin-top: 4px;">Skip for now</button>
       </div>
     </div>
 
@@ -160,7 +165,7 @@
         <p style="font-size: 13px; color: #9fadbd; margin: 0;">Time Saved Skipping: <b id="time-saved-display" style="color: #fff;">0m</b></p>
         
         <div id="xp-progress-wrapper">
-          <div id="xp-progress-container" title="Watch more anime to level up!">
+          <div id="xp-progress-container" title="Watch more anime to level up! (1 minute watched = 1 XP)">
             <div id="xp-progress-bar"></div>
             <div id="xp-hover-text">0 / 0 mins</div>
           </div>
@@ -250,34 +255,58 @@
   </div>
 
   <div id="detail-view" class="hidden">
-    <button id="back-btn">← Back</button>
-    <div class="detail-header">
-      <img id="detail-image" src="" alt="Cover" title="Click to expand">
-      <h3 id="anime-title">Anime Title</h3>
-    </div>
-    <div class="update-form">
-      <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; color: #9fadbd; margin-bottom: 20px;">
+    <!-- Top Nav with Back Button & Toggle -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+      <button id="back-btn" class="secondary-btn">← Back</button>
+      <label class="toggle-switch-container" title="Hide this media from my schedule">
         <input type="checkbox" id="hide-title-toggle">
-        👁️ Hide this anime from my schedule
+        <span class="toggle-slider"></span>
+        <span class="toggle-label">hide?</span>
       </label>
-      
-      <label>Status:
-        <select id="status-select">
-          <option value="CURRENT">Watching</option>
-          <option value="COMPLETED">Completed</option>
-          <option value="DROPPED">Dropped</option>
-          <option value="PAUSED">Paused</option>
-        </select>
-      </label>
-      <label>Episode:
-        <div class="episode-controls">
-          <input type="number" id="episode-input" min="0">
-          <span id="total-episodes">/ ?</span>
+    </div>
+
+    <!-- Header: Cover, Title, and Synonyms -->
+    <div style="display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-start;">
+      <img id="detail-image" src="" alt="Cover" style="width: 80px; height: 115px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.5);">
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h3 id="anime-title" style="margin: 0; font-size: 15px; line-height: 1.2; color: #fff;">Title</h3>
+        <div id="anime-synonyms" style="font-size: 11px; color: #9fadbd; font-style: italic;">Synonyms here</div>
+      </div>
+    </div>
+    
+    <!-- Synopsis Section -->
+    <div style="margin-bottom: 20px; font-size: 12px; color: #d3d3d3; line-height: 1.4; border-bottom: 1px solid #1a2636; padding-bottom: 15px;">
+      <div id="anime-synopsis" style="display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;">Synopsis Text here...</div>
+      <a href="#" id="read-more-synopsis" style="color: #3db4f2; font-weight: bold; text-decoration: none; font-size: 11px; float: right; margin-top: 4px;">Read More</a>
+      <div style="clear: both;"></div>
+    </div>
+
+    <!-- Input Forms -->
+    <div class="update-form">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #fff; font-weight: bold;">
+          Status:
+          <select id="status-select">
+            <option value="CURRENT">Watching</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="DROPPED">Dropped</option>
+            <option value="PAUSED">Paused</option>
+          </select>
+        </label>
+        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #fff; font-weight: bold;">
+          Score (0-100):
+          <input type="number" id="score-input" min="0" max="100" placeholder="e.g., 85">
+        </label>
+      </div>
+
+      <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #fff; font-weight: bold; margin-bottom: 20px;">
+        Episode / Chapter:
+        <div class="episode-controls" style="display: flex; align-items: center; gap: 10px;">
+          <input type="number" id="episode-input" min="0" style="flex-grow: 1;">
+          <span id="total-episodes" style="font-size: 16px; font-weight: bold; min-width: 30px; text-align: center; color: #9fadbd;">/ ?</span>
         </div>
       </label>
-      <label>Score (0-100):
-        <input type="number" id="score-input" min="0" max="100" placeholder="e.g., 85">
-      </label>
+
       <button id="save-btn" class="primary-btn">Save Update</button>
     </div>
   </div>
