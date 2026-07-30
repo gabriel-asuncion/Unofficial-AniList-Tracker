@@ -395,7 +395,22 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
 
         await apiRequest(mutation, variables, token);
         updatedPlatforms.push("AniList");
-        processOfflineQueue(); 
+        
+        // ✅ SURGICAL FIX 1: Mutate the cache locally for instant sync, bypassing AniList's delayed servers
+        chrome.storage.local.get(['full_watchlist_cache'], (res) => {
+            if (res.full_watchlist_cache && res.full_watchlist_cache.data) {
+                const entry = res.full_watchlist_cache.data.find(e => e.media.id === media.id);
+                if (entry) {
+                    entry.progress = intEpisode;
+                    entry.status = newStatus;
+                } else {
+                    res.full_watchlist_cache.data.push({ progress: intEpisode, status: newStatus, media: media });
+                }
+                chrome.storage.local.set({ full_watchlist_cache: res.full_watchlist_cache });
+            }
+            setTimeout(() => chrome.storage.local.set({ trigger_dom_refresh: Date.now() }), 500);
+        });
+        processOfflineQueue();
       } catch (networkError) {
         queueFailedUpdate(media.id, intEpisode, newStatus, token);
       }
@@ -445,9 +460,10 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
     }
 
     if (isCompleted) {
-      chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, malId: media.idMal, isMalOnly: media.isMalOnly, animeName: animeName, mediaType: 'ANIME' }, { frameId: frameId });
+      // ✅ SURGICAL FIX 1: Catch the harmless unresolved promise error
+      chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, malId: media.idMal, isMalOnly: media.isMalOnly, animeName: animeName, mediaType: 'ANIME' }, { frameId: frameId }).catch(() => {});
     } else if (updatedPlatforms.length > 0) {
-      chrome.tabs.sendMessage(tabId, { action: "SHOW_SUCCESS_TOAST", message: toastMessage }, { frameId: frameId }); 
+      chrome.tabs.sendMessage(tabId, { action: "SHOW_SUCCESS_TOAST", message: toastMessage }, { frameId: frameId }).catch(() => {}); 
     }
 
   } catch (error) {
@@ -565,7 +581,22 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
           
           await apiRequest(mutation, variables, token);
           updatedPlatforms.push("AniList");
-          processOfflineQueue(); 
+          
+          // ✅ SURGICAL FIX 2: Mutate the cache locally for instant sync, bypassing AniList's delayed servers
+          chrome.storage.local.get(['full_watchlist_cache'], (res) => {
+              if (res.full_watchlist_cache && res.full_watchlist_cache.data) {
+                  const entry = res.full_watchlist_cache.data.find(e => e.media.id === media.id);
+                  if (entry) {
+                      entry.progress = intChapter;
+                      entry.status = newStatus;
+                  } else {
+                      res.full_watchlist_cache.data.push({ progress: intChapter, status: newStatus, media: media });
+                  }
+                  chrome.storage.local.set({ full_watchlist_cache: res.full_watchlist_cache });
+              }
+              setTimeout(() => chrome.storage.local.set({ trigger_dom_refresh: Date.now() }), 500);
+          });
+          processOfflineQueue();
         } catch (networkError) {
           queueFailedUpdate(media.id, intChapter, newStatus, token);
         }
@@ -734,10 +765,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // ==========================================
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (sender && sender.tab && !sender.tab.active) {
-    sendResponse({ otgTime: null });
-    return false; 
-  }
+  // ✅ SURGICAL FIX 1: Removed the 'sender.tab.active' guard so background tracking continues when the popup is open!
 
   if (message.action === "AUTO_UPDATE_ANIME") {
     // ✅ Add sender.frameId to the end of the arguments
@@ -745,12 +773,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true }); 
     return false; 
   }
+  
   else if (message.action === "GET_USER_WATCHLIST") {
-    chrome.storage.local.get(['cachedList_data'], (res) => {
-      sendResponse({ watchlist: res.cachedList_data || [] });
+    chrome.storage.local.get(['full_watchlist_cache', 'anilistToken', 'anilistUserId'], async (res) => {
+      // Use cache if it's less than 2 hours old AND not empty
+      if (res.full_watchlist_cache && res.full_watchlist_cache.data.length > 0 && (Date.now() - res.full_watchlist_cache.timestamp < 7200000)) {
+        sendResponse({ watchlist: res.full_watchlist_cache.data });
+        return;
+      }
+      
+      if (res.anilistToken && res.anilistUserId) {
+        try {
+          const query = `
+            query($userId: Int) {
+              MediaListCollection(userId: $userId, type: ANIME) {
+                lists { entries { progress status score media { id idMal chapters episodes format nextAiringEpisode { airingAt episode } title { romaji english } } } }
+              }
+            }
+          `;
+          const apiRes = await apiRequest(query, { userId: res.anilistUserId }, res.anilistToken);
+          let allEntries = [];
+          if (apiRes.data && apiRes.data.MediaListCollection && apiRes.data.MediaListCollection.lists) {
+              apiRes.data.MediaListCollection.lists.forEach(l => allEntries.push(...l.entries));
+          }
+          if (allEntries.length > 0) {
+              chrome.storage.local.set({ full_watchlist_cache: { timestamp: Date.now(), data: allEntries }});
+          }
+          sendResponse({ watchlist: allEntries });
+        } catch(e) {
+          sendResponse({ watchlist: res.full_watchlist_cache?.data || [] });
+        }
+      } else {
+        sendResponse({ watchlist: [] });
+      }
     });
     return true;
   }
+
   else if (message.action === "FETCH_MEDIA_STATS") {
     const cacheKey = `stats_v3_${message.mediaId}`; 
     
@@ -893,7 +952,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; 
   }
   
-  // --- FIX: STRICT, HONEST ADD_TO_WATCHLIST RESPONSE ---
+  // ✅ SURGICAL FIX 3: Deduplicated ADD_TO_WATCHLIST & wired to the Reactivity Bridge
   else if (message.action === "ADD_TO_WATCHLIST") {
     chrome.storage.local.get(['anilistToken', 'malToken'], async (res) => {
       let alSuccess = false;
@@ -909,55 +968,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const mutation = `mutation ($mediaId: Int, $status: MediaListStatus) { SaveMediaListEntry (mediaId: $mediaId, status: $status) { id } }`;
         try {
           const alRes = await apiRequest(mutation, { mediaId: message.mediaId, status: 'CURRENT' }, res.anilistToken);
-          // STRICT CHECK: Ensure no GraphQL errors were thrown
-          if (!alRes.errors) alSuccess = true;
-        } catch (e) { console.error("AL Add Failed:", e); }
-      }
-
-      // 2. Add to MAL
-      const malIdToUse = message.malId || (message.mediaId < 0 ? Math.abs(message.mediaId) : null);
-      if (res.malToken && malIdToUse) {
-        attemptedMAL = true;
-        try {
-          const endpoint = mediaType === 'MANGA' ? `manga/${malIdToUse}/my_list_status` : `anime/${malIdToUse}/my_list_status`;
-          const statusVal = mediaType === 'MANGA' ? 'reading' : 'watching';
-          const malRes = await safeMalApiRequest(endpoint, 'PUT', { status: statusVal }, res.malToken);
-          if (malRes && malRes.status) malSuccess = true;
-        } catch (e) { console.error("MAL Add Failed:", e); }
-      }
-
-      // 3. Evaluate truth
-      let overallSuccess = false;
-      if (attemptedAL && attemptedMAL) {
-         overallSuccess = alSuccess || malSuccess; // Return true if at least ONE connected service saved it
-      } else if (attemptedAL) {
-         overallSuccess = alSuccess;
-      } else if (attemptedMAL) {
-         overallSuccess = malSuccess;
-      }
-
-      sendResponse({ success: overallSuccess });
-    });
-    return true;
-  }
-  
-  // --- FIX: HONEST ADD_TO_WATCHLIST RESPONSE ---
-  else if (message.action === "ADD_TO_WATCHLIST") {
-    chrome.storage.local.get(['anilistToken', 'malToken'], async (res) => {
-      let alSuccess = false;
-      let malSuccess = false;
-      let attemptedAL = false;
-      let attemptedMAL = false;
-      
-      const mediaType = message.mediaType || 'ANIME';
-
-      // 1. Add to AniList
-      if (res.anilistToken && message.mediaId && message.mediaId > 0) {
-        attemptedAL = true;
-        const mutation = `mutation ($mediaId: Int, $status: MediaListStatus) { SaveMediaListEntry (mediaId: $mediaId, status: $status) { id } }`;
-        try {
-          const alRes = await apiRequest(mutation, { mediaId: message.mediaId, status: 'CURRENT' }, res.anilistToken);
-          // Guarantee it actually saved by checking for GraphQL errors
           if (!alRes.errors) alSuccess = true;
         } catch (e) { console.error("AL Add Failed:", e); }
       }
@@ -974,14 +984,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } catch (e) { console.error("MAL Add Failed:", e); }
       }
 
-      // Provide honest feedback: Only say it succeeded if the connected platforms actually registered it!
+      // 3. Evaluate truth and trigger DOM refresh
       let overallSuccess = false;
-      if (attemptedAL && attemptedMAL) {
-         overallSuccess = alSuccess && malSuccess;
-      } else if (attemptedAL) {
-         overallSuccess = alSuccess;
-      } else if (attemptedMAL) {
-         overallSuccess = malSuccess;
+      if (attemptedAL && attemptedMAL) overallSuccess = alSuccess && malSuccess;
+      else if (attemptedAL) overallSuccess = alSuccess;
+      else if (attemptedMAL) overallSuccess = malSuccess;
+
+      if (overallSuccess) {
+         chrome.storage.local.remove('full_watchlist_cache');
+         chrome.storage.local.set({ trigger_dom_refresh: Date.now() });
       }
 
       sendResponse({ success: overallSuccess });
@@ -990,12 +1001,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   else if (message.action === "LIVE_VIDEO_PROGRESS") {
+    // ✅ SURGICAL FIX: Lock the badge updates to the specific tab ID to prevent conflicts
     if (message.hasTriggeredUpdate) {
-      chrome.action.setBadgeBackgroundColor({ color: '#4cca51' });
-      chrome.action.setBadgeText({ text: '✓' });
+      chrome.action.setBadgeBackgroundColor({ color: '#4cca51', tabId: sender.tab.id });
+      chrome.action.setBadgeText({ text: '✓', tabId: sender.tab.id });
     } else if (message.progress > 0) {
-      chrome.action.setBadgeBackgroundColor({ color: '#3db4f2' });
-      chrome.action.setBadgeText({ text: `${Math.floor(message.progress)}%` });
+      chrome.action.setBadgeBackgroundColor({ color: '#3db4f2', tabId: sender.tab.id });
+      chrome.action.setBadgeText({ text: `${Math.floor(message.progress)}%`, tabId: sender.tab.id });
     }
 
     if (message.isOtgLoaded === false && sender.tab) {
