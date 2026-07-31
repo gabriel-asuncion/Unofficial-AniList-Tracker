@@ -227,28 +227,22 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
   let customSkipSyncInterval = null;
 
+  // ✅ SURGICAL FIX 1: Transformed the invisible top-right hotzone into a standard bottom-right button
   function mountCustomSkipButton() {
     if (document.getElementById('shiinah-custom-hotzone')) return;
 
-    const btn = document.createElement('div');
+    const btn = document.createElement('button');
     btn.id = 'shiinah-custom-hotzone';
     
+    // Exactly matches the Tier 1 button UI
     Object.assign(btn.style, {
-      position: 'fixed', width: '160px', height: '100px',
-      backgroundColor: 'rgba(255, 255, 255, 0.01)', cursor: 'pointer', zIndex: '2147483647',
-      borderRadius: '8px', display: 'none', transition: 'background-color 0.2s ease',
-      alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto'
+      position: 'fixed', zIndex: '2147483647', display: 'none',
+      backgroundColor: 'rgba(21, 31, 46, 0.85)', color: '#fff', border: '1px solid #3db4f2',
+      padding: '12px 20px', borderRadius: '6px', cursor: 'pointer',
+      fontFamily: 'system-ui, sans-serif', fontWeight: 'bold', fontSize: '15px',
+      transition: 'all 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+      pointerEvents: 'auto'
     });
-
-    const hoverText = document.createElement('span');
-    Object.assign(hoverText.style, {
-      backgroundColor: 'rgba(21, 31, 46, 0.9)', color: '#4cca51',
-      border: '1px solid #4cca51', padding: '10px 16px', borderRadius: '6px',
-      fontFamily: 'system-ui, sans-serif', fontWeight: 'bold', fontSize: '14px',
-      display: 'none', pointerEvents: 'none', backdropFilter: 'blur(4px)',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-    });
-    btn.appendChild(hoverText);
 
     const formatTime = (secs) => {
       const m = Math.floor(secs / 60);
@@ -256,29 +250,16 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       return `${m}:${s}`;
     };
 
-    btn.addEventListener('mouseenter', () => {
-      btn.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-      if (trackedVideo) {
-        const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
-        const skipAmount = isOP ? learnedSkipData.op : learnedSkipData.ed;
-        hoverText.textContent = `⏭ Skip: ${formatTime(skipAmount)}`;
-      }
-      hoverText.style.display = 'block';
-    });
-
-    btn.addEventListener('mouseleave', () => {
-      btn.style.backgroundColor = 'rgba(255, 255, 255, 0.01)';
-      hoverText.style.display = 'none';
-    });
+    btn.addEventListener('mouseenter', () => btn.style.backgroundColor = 'rgba(61, 180, 242, 0.9)');
+    btn.addEventListener('mouseleave', () => btn.style.backgroundColor = 'rgba(21, 31, 46, 0.85)');
 
     btn.addEventListener('click', (e) => {
-      e.stopPropagation(); 
+      e.preventDefault(); e.stopPropagation(); 
       if (!trackedVideo) return;
       const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
       const skipAmount = isOP ? learnedSkipData.op : learnedSkipData.ed;
       trackedVideo.currentTime += skipAmount;
-      showInPageToast('info', 'Custom Skip', `Skipped ${skipAmount}s using learned data!`);
-      hoverText.style.display = 'none';
+      showInPageToast('info', 'Smart Skip', `Skipped ${skipAmount}s based on your history!`);
       btn.style.display = 'none';
     });
 
@@ -286,7 +267,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     container.appendChild(btn);
     customSkipBtnMounted = true;
 
-    // Track the video position and mathematically pin the hotzone
+    // Track the video position and mathematically pin the button to the bottom right (same as Tier 1)
     if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
     customSkipSyncInterval = setInterval(() => {
       if (!trackedVideo) return;
@@ -294,11 +275,14 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       if (btn.parentElement !== currentContainer) currentContainer.appendChild(btn);
       
       const rect = trackedVideo.getBoundingClientRect();
-      btn.style.top = (rect.top + (rect.height * 0.10)) + 'px';
-      btn.style.right = (window.innerWidth - rect.right + (rect.width * 0.05)) + 'px';
+      btn.style.bottom = (window.innerHeight - rect.bottom + 70) + 'px';
+      btn.style.right = (window.innerWidth - rect.right + 30) + 'px';
+      
+      const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
+      const skipAmount = isOP ? learnedSkipData.op : learnedSkipData.ed;
+      btn.innerHTML = isOP ? `▶ Skip Intro (+${formatTime(skipAmount)})` : `▶ Skip Outro (+${formatTime(skipAmount)})`;
     }, 50);
   }
-
   const trackerIntervalId = setInterval(() => {
     if (!chrome.runtime?.id) {
       clearInterval(trackerIntervalId);
@@ -379,7 +363,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         const customBtn = document.getElementById('shiinah-custom-hotzone');
         if (customBtn) {
           const pct = trackedVideo.currentTime / trackedVideo.duration;
-          if (pct < 0.5 || pct > 0.8) customBtn.style.display = 'flex';
+          // ✅ SURGICAL FIX 2: Reveal it as a standard 'block' button instead of 'flex'
+          if (pct < 0.5 || pct > 0.8) customBtn.style.display = 'block';
           else customBtn.style.display = 'none';
         }
       }
@@ -814,8 +799,11 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // 🏷️ SMART CARD-BASED DOM SCANNER & TOOLTIP
   // ==========================================
   const SVG_UNLISTED = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>svg { overflow: visible; }@keyframes kf_pulse_1_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_1_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_1 { transform-origin: 0 0; animation: kf_pulse_1_transform_0 2s linear infinite, kf_pulse_1_stroke_0 2s linear infinite;}@keyframes kf_pulse_2_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  10% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  30% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_2_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_2 { transform-origin: 0 0; animation: kf_pulse_2_transform_0 2s linear infinite, kf_pulse_2_stroke_0 2s linear infinite;}@keyframes kf_pulse_3_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  40% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_3_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  40% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_3 { transform-origin: 0 0; animation: kf_pulse_3_transform_0 2s linear infinite, kf_pulse_3_stroke_0 2s linear infinite;}</style><g id="watchlist_no"><circle id="pulse_1" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_2" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_3" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="bg" cx="12" cy="12" r="12" fill="#FFD345"/><path id="i" transform="translate(9 4)" d="M3.648 3.744C2.976 3.744 2.472 3.592 2.136 3.288C1.8 2.968 1.632 2.528 1.632 1.968C1.632 1.408 1.848 0.944 2.28 0.576C2.728 0.192 3.28 0 3.936 0C4.528 0 5.008 0.144 5.376 0.432C5.744 0.72 5.928 1.128 5.928 1.656C5.928 2.296 5.72 2.808 5.304 3.192C4.888 3.56 4.336 3.744 3.648 3.744ZM1.344 16.632C0.832 16.632 0.48 16.528 0.288 16.32C0.096 16.112 0 15.784 0 15.336C0 15.208 0.016 14.984 0.048 14.664C0.304 11.736 0.728 9.072 1.32 6.672C1.448 6.176 1.656 5.832 1.944 5.64C2.248 5.432 2.728 5.328 3.384 5.328C4.072 5.328 4.416 5.608 4.416 6.168C4.416 6.248 4.4 6.4 4.368 6.624C3.648 10.048 3.216 12.92 3.072 15.24C3.04 15.752 2.888 16.112 2.616 16.32C2.344 16.528 1.92 16.632 1.344 16.632Z" fill="white"/></g></svg>`)}`;
-  // const SVG_YES = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>@keyframes kf_outline_transform_0 {  0% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }  15.85% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translate(12px, 12px) scaleX(0.8) scaleY(0.8) translate(-12px, -12px);  }  33.1% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translate(12px, 12px) scaleX(0.95) scaleY(0.95) translate(-12px, -12px);  }  57.95% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translate(12px, 12px) scaleX(0.61) scaleY(0.61) translate(-12px, -12px);  }  85.5% {transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }  100% {transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }}#outline {  transform-origin: 0 0;  animation: kf_outline_transform_0 2s linear infinite;}@keyframes kf_fill_transform_0 {  0% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }  19.9% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translate(12px, 12px) scaleX(0.57) scaleY(0.57) translate(-12px, -12px);  }  34.95% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translate(12px, 12px) scaleX(0.6) scaleY(0.6) translate(-12px, -12px);  }  46.25% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translate(12px, 12px) scaleX(0.99) scaleY(0.99) translate(-12px, -12px);  }  63.65% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translate(12px, 12px) scaleX(0.33) scaleY(0.33) translate(-12px, -12px);  }  83.45% {transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }  100% {transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }}#fill {  transform-origin: 0 0;  animation: kf_fill_transform_0 2s linear infinite;}@keyframes kf_check_group_transform_0 {  0% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  30% {transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-1.571rad) translate(-8px, -8px);  }  42.5% {animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-1.571rad) translate(-8px, -8px);  }  50% {transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  100% {transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }}#check_group {  transform-origin: 0 0;  animation: kf_check_group_transform_0 2s linear infinite;}</style><g id="new_ok" clip-path="url(#clip0_304_952)"><circle id="outline" cx="12" cy="12" r="11.5" stroke="#4CCA51"/><circle id="fill" cx="12" cy="12" r="12" fill="#4CCA51"/><g id="check_group" clip-path="url(#clip1_304_952)" transform="translate(4 4)"><rect id="left" transform="matrix(-0.707107 -0.707107 -0.707107 0.707107 7.4248 12.6567)" width="8.72559" height="2.5" rx="2" fill="white"><animate attributeName="width" values="8.726; 8.139; 7.553; 6.966; 6.38; 5.793; 5.207; 4.62; 4.034; 3.447; 2.86; 2.274; 1.687; 1.547; 1.406; 1.266; 1.125; 0.984; 0.844; 0.703; 0.563; 0.422; 0.281; 0.141; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0; 0.007; 0.013; 0.019; 0.026; 0.032; 0.039; 0.045; 0.051; 0.058; 0.064; 0.071; 0.077; 0.26; 0.443; 0.626; 0.809; 0.992; 1.175; 1.358; 1.541; 1.724; 1.907; 2.09; 2.273; 2.45; 2.626; 2.803; 2.979; 3.156; 3.332; 3.509; 3.685; 3.862; 4.039; 4.215; 4.392; 4.753; 5.114; 5.475; 5.836; 6.198; 6.559; 6.92; 7.281; 7.642; 8.003; 8.364; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726; 8.726" keyTimes="0; 0.0132; 0.0264; 0.0396; 0.0528; 0.066; 0.0793; 0.0925; 0.1057; 0.1189; 0.1321; 0.1453; 0.1585; 0.1617; 0.1648; 0.168; 0.1712; 0.1743; 0.1775; 0.1807; 0.1838; 0.187; 0.1902; 0.1933; 0.1965; 0.1967; 0.1969; 0.1971; 0.1973; 0.1975; 0.1978; 0.198; 0.1982; 0.1984; 0.1986; 0.1988; 0.199; 0.2074; 0.2158; 0.2243; 0.2327; 0.2411; 0.2495; 0.2579; 0.2663; 0.2748; 0.2832; 0.2916; 0.3; 0.3009; 0.3018; 0.3026; 0.3035; 0.3044; 0.3053; 0.3061; 0.307; 0.3079; 0.3088; 0.3096; 0.3105; 0.3122; 0.3139; 0.3156; 0.3173; 0.319; 0.3208; 0.3225; 0.3242; 0.3259; 0.3276; 0.3293; 0.331; 0.3325; 0.3341; 0.3356; 0.3372; 0.3387; 0.3403; 0.3418; 0.3433; 0.3449; 0.3464; 0.348; 0.3495; 0.3558; 0.3621; 0.3684; 0.3747; 0.381; 0.3873; 0.3935; 0.3998; 0.4061; 0.4124; 0.4187; 0.425; 0.4281; 0.4313; 0.4344; 0.4375; 0.4406; 0.4438; 0.4469; 0.45; 0.4531; 0.4563; 0.4594; 0.4625; 0.4656; 0.4688; 0.4719; 0.475; 0.4781; 0.4813; 0.4844; 0.4875; 0.4906; 0.4938; 0.4969; 0.5; 0.5065; 0.5129; 0.5194; 0.5258; 0.5323; 0.5387; 0.5452; 0.5517; 0.5581; 0.5646; 0.571; 0.5775; 0.5777; 0.5778; 0.578; 0.5782; 0.5783; 0.5785; 0.5787; 0.5788; 0.579; 0.5792; 0.5793; 0.5795; 0.5843; 0.589; 0.5938; 0.5985; 0.6032; 0.608; 0.6128; 0.6175; 0.6223; 0.627; 0.6318; 0.6365; 0.6411; 0.6457; 0.6503; 0.6548; 0.6594; 0.664; 0.6686; 0.6732; 0.6778; 0.6823; 0.6869; 0.6915; 0.7009; 0.7103; 0.7196; 0.729; 0.7384; 0.7478; 0.7571; 0.7665; 0.7759; 0.7853; 0.7946; 0.804; 0.8065; 0.8091; 0.8116; 0.8142; 0.8167; 0.8193; 0.8218; 0.8243; 0.8269; 0.8294; 0.832; 0.8345; 0.8362; 0.8379; 0.8396; 0.8413; 0.843; 0.8448; 0.8465; 0.8482; 0.8499; 0.8516; 0.8533; 0.855; 0.8671; 0.8792; 0.8913; 0.9033; 0.9154; 0.9275; 0.9396; 0.9517; 0.9638; 0.9758; 0.9879; 1" dur="2s" calcMode="linear" repeatCount="indefinite" /></rect><rect id="right" transform="translate(4 12.6567) rotate(-45)" width="15.1949" height="2.5" rx="2" fill="white"><animate attributeName="width" values="15.195; 14.676; 14.157; 13.639; 13.12; 12.601; 12.082; 11.564; 11.045; 10.526; 10.007; 9.489; 8.97; 8.845; 8.721; 8.597; 8.472; 8.348; 8.224; 8.099; 7.975; 7.85; 7.726; 7.602; 7.477; 7.469; 7.461; 7.453; 7.445; 7.436; 7.428; 7.42; 7.412; 7.404; 7.396; 7.387; 7.379; 7.049; 6.718; 6.387; 6.057; 5.726; 5.396; 5.065; 4.735; 4.404; 4.074; 3.743; 3.412; 3.378; 3.344; 3.309; 3.275; 3.241; 3.206; 3.172; 3.137; 3.103; 3.069; 3.034; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 3; 4.016; 5.032; 6.049; 7.065; 8.081; 9.097; 10.114; 11.13; 12.146; 13.162; 14.179; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195; 15.195" keyTimes="0; 0.0132; 0.0264; 0.0396; 0.0528; 0.066; 0.0793; 0.0925; 0.1057; 0.1189; 0.1321; 0.1453; 0.1585; 0.1617; 0.1648; 0.168; 0.1712; 0.1743; 0.1775; 0.1807; 0.1838; 0.187; 0.1902; 0.1933; 0.1965; 0.1967; 0.1969; 0.1971; 0.1973; 0.1975; 0.1978; 0.198; 0.1982; 0.1984; 0.1986; 0.1988; 0.199; 0.2074; 0.2158; 0.2243; 0.2327; 0.2411; 0.2495; 0.2579; 0.2663; 0.2748; 0.2832; 0.2916; 0.3; 0.3009; 0.3018; 0.3026; 0.3035; 0.3044; 0.3053; 0.3061; 0.307; 0.3079; 0.3088; 0.3096; 0.3105; 0.3122; 0.3139; 0.3156; 0.3173; 0.319; 0.3208; 0.3225; 0.3242; 0.3259; 0.3276; 0.3293; 0.331; 0.3325; 0.3341; 0.3356; 0.3372; 0.3387; 0.3403; 0.3418; 0.3433; 0.3449; 0.3464; 0.348; 0.3495; 0.3558; 0.3621; 0.3684; 0.3747; 0.381; 0.3873; 0.3935; 0.3998; 0.4061; 0.4124; 0.4187; 0.425; 0.4281; 0.4313; 0.4344; 0.4375; 0.4406; 0.4438; 0.4469; 0.45; 0.4531; 0.4563; 0.4594; 0.4625; 0.4656; 0.4688; 0.4719; 0.475; 0.4781; 0.4813; 0.4844; 0.4875; 0.4906; 0.4938; 0.4969; 0.5; 0.5065; 0.5129; 0.5194; 0.5258; 0.5323; 0.5387; 0.5452; 0.5517; 0.5581; 0.5646; 0.571; 0.5775; 0.5777; 0.5778; 0.578; 0.5782; 0.5783; 0.5785; 0.5787; 0.5788; 0.579; 0.5792; 0.5793; 0.5795; 0.5843; 0.589; 0.5938; 0.5985; 0.6032; 0.608; 0.6128; 0.6175; 0.6223; 0.627; 0.6318; 0.6365; 0.6411; 0.6457; 0.6503; 0.6548; 0.6594; 0.664; 0.6686; 0.6732; 0.6778; 0.6823; 0.6869; 0.6915; 0.7009; 0.7103; 0.7196; 0.729; 0.7384; 0.7478; 0.7571; 0.7665; 0.7759; 0.7853; 0.7946; 0.804; 0.8065; 0.8091; 0.8116; 0.8142; 0.8167; 0.8193; 0.8218; 0.8243; 0.8269; 0.8294; 0.832; 0.8345; 0.8362; 0.8379; 0.8396; 0.8413; 0.843; 0.8448; 0.8465; 0.8482; 0.8499; 0.8516; 0.8533; 0.855; 0.8671; 0.8792; 0.8913; 0.9033; 0.9154; 0.9275; 0.9396; 0.9517; 0.9638; 0.9758; 0.9879; 1" dur="2s" calcMode="linear" repeatCount="indefinite" /></rect></g></g><defs><clipPath id="clip0_304_952"><rect width="24" height="24" fill="white"/></clipPath><clipPath id="clip1_304_952"><rect width="16" height="16" fill="white"/></clipPath></defs></svg></div>`;
-  const SVG_NO = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>@keyframes kf_outline_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }  15.85% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translate(12px, 12px) scaleX(0.8) scaleY(0.8) translate(-12px, -12px);  }  33.1% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translate(12px, 12px) scaleX(0.95) scaleY(0.95) translate(-12px, -12px);  }  57.95% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translate(12px, 12px) scaleX(0.61) scaleY(0.61) translate(-12px, -12px);  }  85.5% {    transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }  100% {    transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }}#outline {  transform-origin: 0 0;  animation: kf_outline_transform_0 2s linear infinite;}@keyframes kf_fill_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }  19.9% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translate(12px, 12px) scaleX(0.57) scaleY(0.57) translate(-12px, -12px);  }  34.95% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translate(12px, 12px) scaleX(0.6) scaleY(0.6) translate(-12px, -12px);  }  46.25% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translate(12px, 12px) scaleX(0.99) scaleY(0.99) translate(-12px, -12px);  }  63.65% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translate(12px, 12px) scaleX(0.33) scaleY(0.33) translate(-12px, -12px);  }  83.45% {    transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }  100% {    transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px);  }}#fill {  transform-origin: 0 0;  animation: kf_fill_transform_0 2s linear infinite;}@keyframes kf_check_group_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  30% {    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-1.571rad) translate(-8px, -8px);  }  42.5% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-1.571rad) translate(-8px, -8px);  }  50% {    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  100% {    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }}#check_group {  transform-origin: 0 0;  animation: kf_check_group_transform_0 2s linear infinite;}@keyframes kf_left_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(14.789px) translateY(13px) translate(-6.894px, -5.127px) rotate(0rad) translate(6.894px, 5.127px) rotate(-2.356rad) scaleX(1) scaleY(-1);  }  26.75% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(14.789px) translateY(13px) translate(-6.894px, -5.127px) rotate(0.367rad) translate(6.894px, 5.127px) rotate(-2.356rad) scaleX(1) scaleY(-1);  }  53.65% {    transform: translateX(14.789px) translateY(13px) translate(-6.894px, -5.127px) rotate(0rad) translate(6.894px, 5.127px) rotate(-2.356rad) scaleX(1) scaleY(-1);  }  100% {    transform: translateX(14.789px) translateY(13px) translate(-6.894px, -5.127px) rotate(0rad) translate(6.894px, 5.127px) rotate(-2.356rad) scaleX(1) scaleY(-1);  }}#left {  transform-origin: 0 0;  animation: kf_left_transform_0 2s linear infinite;}@keyframes kf_right_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(1px) translateY(13px) translate(6.894px, -5.127px) rotate(0rad) translate(-6.894px, 5.127px) rotate(-0.785rad) scaleX(1) scaleY(1);  }  26.75% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(1px) translateY(13px) translate(6.894px, -5.127px) rotate(-0.785rad) translate(-6.894px, 5.127px) rotate(-0.785rad) scaleX(1) scaleY(1);  }  66.36% {    transform: translateX(1px) translateY(13px) translate(6.894px, -5.127px) rotate(0rad) translate(-6.894px, 5.127px) rotate(-0.785rad) scaleX(1) scaleY(1);  }  100% {    transform: translateX(1px) translateY(13px) translate(6.894px, -5.127px) rotate(0rad) translate(-6.894px, 5.127px) rotate(-0.785rad) scaleX(1) scaleY(1);  }}#right {  transform-origin: 0 0;  animation: kf_right_transform_0 2s linear infinite;}</style><g id="new_nok" clip-path="url(#clip0_304_958)"><circle id="outline" cx="12" cy="12" r="11.5" stroke="#E74C3C"/><circle id="fill" cx="12" cy="12" r="12" fill="#E74C3C"/><g id="check_group" clip-path="url(#clip1_304_958)" transform="translate(4 4)"><rect id="left" transform="matrix(-0.707107 -0.707107 -0.707107 0.707107 14.7886 13)" width="17" height="2.5" rx="2" fill="white"/><rect id="right" transform="translate(1 13) rotate(-45)" width="17" height="2.5" rx="2" fill="white"/></g></g><defs><clipPath id="clip0_304_958"><rect width="24" height="24" fill="white"/></clipPath><clipPath id="clip1_304_958"><rect width="16" height="16" fill="white"/></clipPath></defs></svg>`)}`;
+
+  const SVG_YES = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>@keyframes kf_check_group_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  10% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-0.262rad) translate(-8px, -8px);  }  20% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0.262rad) translate(-8px, -8px);  }  30% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-0.262rad) translate(-8px, -8px);  }  40% {    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  100% {    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }}#check_group {  transform-origin: 0 0;  animation: kf_check_group_transform_0 2s linear infinite;}</style><g id="new_ok" clip-path="url(#clip0_306_964)"><circle id="outline" cx="12" cy="12" r="11.5" stroke="#4CCA51"/><circle id="fill" cx="12" cy="12" r="12" fill="#4CCA51"/><g id="check_group" transform="translate(4 4)"><rect id="left" transform="matrix(-0.707107 -0.707107 -0.707107 0.707107 7.4248 12.6567)" width="8.72559" height="2.5" rx="2" fill="white"/><rect id="right" transform="translate(4 12.6567) rotate(-45)" width="15.1949" height="2.5" rx="2" fill="white"/></g></g><defs><clipPath id="clip0_306_964"><rect width="24" height="24" fill="white"/></clipPath></defs></svg>`)}`;
+
+  const SVG_NO = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>@keyframes kf_Vector_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1) scaleY(1) translate(-6.377px, -6.377px);  }  30% {    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1.2) scaleY(1.2) translate(-6.377px, -6.377px);  }  50% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1.2) scaleY(1.2) translate(-6.377px, -6.377px);  }  60% {    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1) scaleY(1) translate(-6.377px, -6.377px);  }  100% {    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1) scaleY(1) translate(-6.377px, -6.377px);  }}#Vector {  transform-origin: 0 0;  animation: kf_Vector_transform_0 2s linear infinite;}</style><g id="new_nok" clip-path="url(#clip0_306_998)"><circle id="outline" cx="12" cy="12" r="11.5" stroke="#E74C3C"/><circle id="fill" cx="12" cy="12" r="12" fill="#E74C3C"/><g id="Vector" transform="translate(5.51777 5.49695)"><path d="M12.3869 12.3869C12.8751 11.8988 12.8751 11.1073 12.3869 10.6192L2.13388 0.366117C1.64573 -0.122039 0.854272 -0.122039 0.366116 0.366116C-0.122039 0.854272 -0.122039 1.64573 0.366117 2.13388L10.6192 12.3869C11.1073 12.8751 11.8988 12.8751 12.3869 12.3869Z" id="Vector_bg_0" fill="white"></path><path d="M0.366117 12.3869C-0.122039 11.8988 -0.122039 11.1073 0.366117 10.6192L10.6192 0.366117C11.1073 -0.122039 11.8988 -0.122039 12.3869 0.366116C12.8751 0.854272 12.8751 1.64573 12.3869 2.13388L2.13388 12.3869C1.64573 12.8751 0.854272 12.8751 0.366117 12.3869Z" fill="white"/></g></g><defs><clipPath id="clip0_306_998"><rect width="24" height="24" fill="white"/></clipPath></defs></svg>`)}`;
+
   function normalizeTitle(title) {
     if (!title) return "";
     return title.toLowerCase()
@@ -1026,29 +1014,31 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     return candidate;
   }
 
-  // ✅ SURGICAL FIX 1: Moved deduplication locks to the BOTTOM to prevent "Poisoning"
+  // ✅ SURGICAL FIX: Ultimate Context-Aware Tracking Logic
   function processAnimeCard(card, watchlist) {
     if (card.hasAttribute('data-shiinah-scanned')) return;
 
-    // 1. STRICT EXCLUSIONS (Do this BEFORE locking the element!)
+    // 1. DEDUPLICATION (Aborts if parent or child is already tracked)
+    if (card.closest('.shiinah-wrapper-marked') || card.querySelector('.shiinah-inline-badge')) {
+        card.setAttribute('data-shiinah-scanned', 'true');
+        return;
+    }
+
+    // 2. EXCLUSIONS: Skip Cast, Staff, Characters, and generic UI buttons
     if (card.closest('.cast-grid, .characters, .staff, .comments, [class*="cast"], [class*="character"], [class*="staff"], [class*="person"]')) return;
     if (card.className && typeof card.className === 'string' && card.className.match(/cast|character|person|staff|avatar|user/i)) return;
-    if (card.closest('button, [role="button"], [role="combobox"], [role="tab"], .btn, .button') && !card.querySelector('img, picture')) return;
-    if (card.tagName === 'BUTTON' || card.getAttribute('role') === 'button' || card.getAttribute('role') === 'combobox') {
-        if (!card.querySelector('img, picture')) return;
-    }
+    
+    // Explicitly allow buttons IF they label themselves as an episode
+    const ariaLabel = card.getAttribute('aria-label') || '';
+    const isEpisodeAria = ariaLabel.toLowerCase().includes('episode') || ariaLabel.toLowerCase().includes('chapter');
+    
+    if (card.closest('button, [role="button"], [role="combobox"], [role="tab"], .btn, .button') && !card.querySelector('img, picture') && !isEpisodeAria) return;
+    if ((card.tagName === 'BUTTON' || card.getAttribute('role') === 'button' || card.getAttribute('role') === 'combobox') && !card.querySelector('img, picture') && !isEpisodeAria) return;
+
     const href = (card.tagName === 'A' ? card.href : (card.querySelector('a')?.href || '')).toLowerCase();
     if (href.match(/\/(character|person|cast|staff|profile|user|comments)\//i)) return;
 
-    // 2. DEDUPLICATION ABORTS
-    if (card.parentElement && card.parentElement.closest('[data-shiinah-scanned="true"]')) return;
-    const wrapper = card.closest('li, article, .slider__item, .swiper-slide, .carousel__item');
-    if (wrapper && wrapper.hasAttribute('data-shiinah-wrapper-scanned')) return;
-    if (card.closest('.shiinah-wrapper-marked') || card.querySelector('.shiinah-inline-badge')) return;
-
-    const isRecommendation = !!card.closest('.recommendations, [class*="recommend"], [class*="related"], [class*="similar"]');
-
-    // 3. TITLE EXTRACTION
+    // 3. TEXT & TITLE EXTRACTION
     let titleEl = card.querySelector('.line-clamp-1, .line-clamp-2, a.font-semibold, h1, h2, h3, h4, h5, .title, .series-title, .anime-title, .manga-title, .card-title, p');
     if (!titleEl && card.tagName !== 'A' && card.tagName !== 'BUTTON') titleEl = card.querySelector('a[href*="/anime/"], a[href*="/series/"]');
     if (!titleEl && (card.tagName === 'A' || card.tagName === 'BUTTON')) titleEl = card;
@@ -1060,47 +1050,50 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     const normRawText = normalizeTitle(rawText);
     const normAltText = normalizeTitle(altText);
 
-    // KILL-SWITCH for generic UI buttons disguised as cards
-    if (!imgEl && (normRawText === "" || IGNORE_UI_WORDS.has(normRawText))) return;
+    // Kill-switch for generic UI buttons disguised as cards
+    if (!imgEl && !isEpisodeAria && (normRawText === "" || IGNORE_UI_WORDS.has(normRawText))) return;
 
-    // 4. ADVANCED EPISODE DETECTION
+    // 4. SMART CLASSIFICATION & EPISODE EXTRACTION
+    const isExplicitSeriesLink = href.includes('/info/') || href.includes('/series/') || href.includes('/category/');
+    const isExplicitWatchLink = href.includes('/watch') || href.includes('/episode') || href.includes('?ep=');
+    const currentPath = window.location.pathname.toLowerCase();
+    const isOnGenericPage = currentPath === '/' || currentPath.includes('/schedule') || currentPath.includes('/home') || currentPath.includes('/latest') || currentPath.includes('/popular');
+
     let isEpisodeCard = false;
     let extractedEp = null;
 
-    if (!isRecommendation) {
-      const inEpContainer = !!card.closest('.episodes-container, [class*="episode-list"], [class*="chapter-list"], #episodes, [class*="episodes"]');
-      const ariaLabel = card.getAttribute('aria-label') || '';
-      
-      const ariaEpMatch = ariaLabel.match(/\b(?:episode|ep|chapter|ch)\s*0*(\d+(\.\d+)?)\b/i);
-      const urlEpMatch = href.match(/(?:[?&](?:n|ep)=|episode[/-]|ep[/-]|chapter[/-]|ch[/-]|\/episodes\/)0*(\d+(\.\d+)?)(?:[?&/#]|$)/i);
-      const textEpMatch = rawText.match(/\b(?:Episode|Ep\.|Ep|Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)\b/i) || altText.match(/\b(?:Episode|Ep\.|Ep|Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)\b/i);
+    // Search for numerical indicators
+    const ariaEpMatch = ariaLabel.match(/\b(?:episode|ep|chapter|ch)\s*0*(\d+(\.\d+)?)\b/i);
+    const urlEpMatch = href.match(/(?:[?&](?:n|ep)=|episode[/-]|ep[/-]|chapter[/-]|ch[/-]|\/episodes\/)0*(\d+(\.\d+)?)(?:[?&/#]|$)/i);
+    const textEpMatch = rawText.match(/\b(?:Episode|Ep\.|Ep|Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)\b/i) || altText.match(/\b(?:Episode|Ep\.|Ep|Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)\b/i);
 
-      let isolatedEpMatch = null;
-      const spans = card.querySelectorAll('span, div, p');
-      for (let span of spans) {
-          const t = (span.textContent || '').trim();
-          const m = t.match(/^(?:Ep|Episode|Ch|Chapter)\s*0*(\d+(\.\d+)?)$/i);
-          if (m) { isolatedEpMatch = parseFloat(m[1]); break; }
-      }
+    let isolatedEpMatch = null;
+    const spans = card.querySelectorAll('span, div, p');
+    for (let span of spans) {
+        const t = (span.textContent || '').trim();
+        const m = t.match(/^(?:Ep|Episode|Ch|Chapter)\s*0*(\d+(\.\d+)?)$/i);
+        if (m) { isolatedEpMatch = parseFloat(m[1]); break; }
+    }
 
-      if (ariaEpMatch) { isEpisodeCard = true; extractedEp = parseFloat(ariaEpMatch[1]); }
-      else if (isolatedEpMatch !== null) { isEpisodeCard = true; extractedEp = isolatedEpMatch; }
-      else if (inEpContainer) {
-        isEpisodeCard = true;
-        if (textEpMatch) extractedEp = parseFloat(textEpMatch[1]);
-        else if (urlEpMatch) extractedEp = parseFloat(urlEpMatch[1]);
-      } else if (urlEpMatch && (href.includes('/watch') || href.includes('episode') || href.includes('chapter') || href.includes('?id='))) {
-        isEpisodeCard = true; extractedEp = parseFloat(urlEpMatch[1]);
-      } else if (textEpMatch && /^Episode\s*\d+$/i.test(rawText.replace(/\s+/g, ' '))) {
-        isEpisodeCard = true; extractedEp = parseFloat(textEpMatch[1]);
-      }
+    if (ariaEpMatch) extractedEp = parseFloat(ariaEpMatch[1]);
+    else if (isolatedEpMatch !== null) extractedEp = isolatedEpMatch;
+    else if (textEpMatch) extractedEp = parseFloat(textEpMatch[1]);
+    else if (urlEpMatch) extractedEp = parseFloat(urlEpMatch[1]);
+
+    // Rule: It is NEVER an episode card if it links to a generic Series info page.
+    if (!isExplicitSeriesLink && extractedEp !== null) {
+        const inEpContainer = !!card.closest('.episodes-container, [class*="episode-list"], [class*="chapter-list"], #episodes, [class*="episodes"]');
+        if (inEpContainer || isExplicitWatchLink || isEpisodeAria || /^(?:Episode|Ep|Chapter|Ch)\s*\d+(\.\d+)?$/i.test(rawText.replace(/[^\w\s]/g, '').trim())) {
+            isEpisodeCard = true;
+        }
     }
 
     if (!isValidTitle(normRawText) && !isValidTitle(normAltText) && extractedEp === null) return;
 
-    // 5. LOCK THE CARD (Safe to lock now because we know it's a valid injection target!)
+    // 5. LOCK THE CARD
     card.setAttribute('data-shiinah-scanned', 'true');
     card.classList.add('shiinah-wrapper-marked');
+    const wrapper = card.closest('li, article, .slider__item, .swiper-slide, .carousel__item');
     if (wrapper) wrapper.setAttribute('data-shiinah-wrapper-scanned', 'true');
     
     const style = window.getComputedStyle(card);
@@ -1119,7 +1112,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       if (isValidTitle(normRawText)) isM = isM || isTitleMatch(normRawText, normEng) || isTitleMatch(normRawText, normRom);
       if (isValidTitle(normAltText)) isM = isM || isTitleMatch(normAltText, normEng) || isTitleMatch(normAltText, normRom);
       
-      if (!isM && isEpisodeCard && extractedEp !== null) {
+      // Rule: ONLY hijack the page title if it is strictly an Episode card AND we are not on a generic hub page.
+      if (!isM && isEpisodeCard && extractedEp !== null && !isOnGenericPage) {
         const pageTitleNorm = normalizeTitle(getPageMainShowTitle());
         if (pageTitleNorm.length > 2) {
           isM = isPageTitleMatch(pageTitleNorm, normEng) || isPageTitleMatch(pageTitleNorm, normRom);
@@ -1129,7 +1123,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       return isM;
     });
 
-    if (!match && isEpisodeCard && extractedEp !== null) {
+    // If no match found, format the fallback title
+    if (!match && isEpisodeCard && extractedEp !== null && !isOnGenericPage) {
         const pageTitle = getPageMainShowTitle();
         if (pageTitle && pageTitle.length > 2) displayTitle = pageTitle;
     }
@@ -1158,7 +1153,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     const media = entry.media;
     const currentProgress = entry.progress || 0;
     
-    // ✅ SURGICAL FIX 6: Properly verify if media is Manga to prevent "CH" label on Anime
+    // Properly verify if media is Manga to prevent "CH" label on Anime
     const isManga = media.format === 'MANGA' || media.format === 'NOVEL' || media.format === 'ONE_SHOT';
     const unitLabel = isManga ? 'Ch' : 'Ep';
 
@@ -1412,7 +1407,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   let shiinahScannerInterval = null;
   let cachedWatchlist = [];
 
-  // ✅ SURGICAL FIX 2: Reactive UI Sync
+  // ✅ SURGICAL FIX: Routes the fetch through the background script to guarantee network fallback if the cache was wiped
   function initSmartTracker() {
     if (!chrome || !chrome.runtime || !chrome.runtime.id) return;
     
@@ -1431,35 +1426,42 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     };
 
     const fetchAndBuild = (forceRedraw = false) => {
-      chrome.storage.local.get(['full_watchlist_cache', 'cachedList_data'], (res) => {
+      // 1. Ask background for the reliable list (it fetches from API if cache was wiped by an update)
+      chrome.runtime.sendMessage({ action: "GET_USER_WATCHLIST" }, (response) => {
+        if (chrome.runtime.lastError) return;
+
         let merged = new Map();
         
-        if (res.full_watchlist_cache && res.full_watchlist_cache.data) {
-          res.full_watchlist_cache.data.forEach(entry => merged.set(entry.media.id, entry));
+        if (response && response.watchlist) {
+          response.watchlist.forEach(entry => merged.set(entry.media.id, entry));
         }
         
-        if (res.cachedList_data) {
-          res.cachedList_data.forEach(entry => merged.set(entry.media.id, entry));
-        }
-        
-        cachedWatchlist = Array.from(merged.values());
-        if (forceRedraw) scanDOM(); 
+        // 2. Overlay the instant popup cache for immediate visual feedback
+        chrome.storage.local.get(['cachedList_data'], (res) => {
+          if (res.cachedList_data) {
+            res.cachedList_data.forEach(entry => merged.set(entry.media.id, entry));
+          }
+          
+          cachedWatchlist = Array.from(merged.values());
+          if (forceRedraw) scanDOM(); 
+        });
       });
     };
 
     // Initial load
     fetchAndBuild(true);
     
-    // When you open the extension, it updates cachedList_data. This listener wipes and redraws the UI.
     chrome.storage.onChanged.addListener((changes) => {
       if (changes.trigger_dom_refresh || changes.cachedList_data || changes.full_watchlist_cache) {
         
-        // Dissolve old badges and clear the tracker flags!
-        document.querySelectorAll('[data-shiinah-scanned]').forEach(el => el.removeAttribute('data-shiinah-scanned'));
-        document.querySelectorAll('[data-shiinah-wrapper-scanned]').forEach(el => el.removeAttribute('data-shiinah-wrapper-scanned'));
-        document.querySelectorAll('.shiinah-wrapper-marked').forEach(el => el.classList.remove('shiinah-wrapper-marked'));
+        // Safely dissolve ONLY the successfully badged wrappers to prevent scanner poisoning
+        document.querySelectorAll('.shiinah-wrapper-marked').forEach(card => {
+            card.removeAttribute('data-shiinah-scanned');
+            card.classList.remove('shiinah-wrapper-marked');
+            const badge = card.querySelector('.shiinah-inline-badge');
+            if (badge) badge.remove();
+        });
         
-        document.querySelectorAll('.shiinah-inline-badge').forEach(el => el.remove());
         document.querySelectorAll('.shiinah-tooltip-container').forEach(el => el.remove());
         
         // Fetch the newly synced lists and redraw immediately
