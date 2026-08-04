@@ -157,6 +157,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   let customSkipBtnMounted = false;
   let learnedSkipData = { op: 85, ed: 85 };
   let manualSeekStart = 0;
+  let sessionSkips = [];
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.trackingThreshold) userThreshold = changes.trackingThreshold.newValue;
@@ -172,6 +173,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   }
 
   let skipSyncInterval = null;
+  let customSkipSyncInterval = null;
+  let lastSkipTime = 0; // ✅ Global cooldown lock to prevent zombie buttons
 
   function mountSkipButton(activeSkip) {
     if (document.getElementById('aniskip-float-btn')) return;
@@ -185,9 +188,20 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       backgroundColor: 'rgba(21, 31, 46, 0.85)', color: '#fff', border: '1px solid #3db4f2',
       padding: '12px 20px', borderRadius: '6px', cursor: 'pointer',
       fontFamily: 'system-ui, sans-serif', fontWeight: 'bold', fontSize: '15px',
-      transition: 'all 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-      pointerEvents: 'auto'
+      transition: 'opacity 0.5s ease, background-color 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+      pointerEvents: 'auto', opacity: '1'
     });
+
+    // ✅ FADE LOGIC: Wait 5 seconds, drop to 8% opacity. Reset on hover.
+    let fadeTimer;
+    const triggerFadeOut = () => {
+      btn.style.opacity = '1';
+      clearTimeout(fadeTimer);
+      fadeTimer = setTimeout(() => { btn.style.opacity = '0.08'; }, 5000);
+    };
+
+    btn.addEventListener('mousemove', triggerFadeOut);
+    triggerFadeOut(); 
 
     btn.addEventListener('mouseenter', () => btn.style.backgroundColor = 'rgba(61, 180, 242, 0.9)');
     btn.addEventListener('mouseleave', () => btn.style.backgroundColor = 'rgba(21, 31, 46, 0.85)');
@@ -195,6 +209,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     btn.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation(); 
       if (trackedVideo && activeSkip && activeSkip.interval.endTime) {
+        lastSkipTime = Date.now(); // Lock it!
         trackedVideo.currentTime = activeSkip.interval.endTime;
         showInPageToast('success', 'Skipped', activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!');
         unmountSkipButton();
@@ -205,7 +220,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     container.appendChild(btn);
     skipButtonMounted = true;
 
-    // Track the video position and mathematically pin the button to the bottom right
     if (skipSyncInterval) clearInterval(skipSyncInterval);
     skipSyncInterval = setInterval(() => {
       if (!trackedVideo) return;
@@ -225,23 +239,19 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     skipButtonMounted = false;
   }
 
-  let customSkipSyncInterval = null;
-
-  // ✅ SURGICAL FIX 1: Transformed the invisible top-right hotzone into a standard bottom-right button
   function mountCustomSkipButton() {
     if (document.getElementById('shiinah-custom-hotzone')) return;
 
     const btn = document.createElement('button');
     btn.id = 'shiinah-custom-hotzone';
     
-    // Exactly matches the Tier 1 button UI
     Object.assign(btn.style, {
       position: 'fixed', zIndex: '2147483647', display: 'none',
       backgroundColor: 'rgba(21, 31, 46, 0.85)', color: '#fff', border: '1px solid #3db4f2',
       padding: '12px 20px', borderRadius: '6px', cursor: 'pointer',
       fontFamily: 'system-ui, sans-serif', fontWeight: 'bold', fontSize: '15px',
-      transition: 'all 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-      pointerEvents: 'auto'
+      transition: 'opacity 0.5s ease, background-color 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+      pointerEvents: 'auto', opacity: '1'
     });
 
     const formatTime = (secs) => {
@@ -250,24 +260,45 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       return `${m}:${s}`;
     };
 
+    // ✅ FADE LOGIC
+    let fadeTimer;
+    const triggerFadeOut = () => {
+      btn.style.opacity = '1';
+      clearTimeout(fadeTimer);
+      fadeTimer = setTimeout(() => { btn.style.opacity = '0.08'; }, 5000);
+    };
+
+    btn.addEventListener('mousemove', triggerFadeOut);
+    triggerFadeOut();
+
     btn.addEventListener('mouseenter', () => btn.style.backgroundColor = 'rgba(61, 180, 242, 0.9)');
     btn.addEventListener('mouseleave', () => btn.style.backgroundColor = 'rgba(21, 31, 46, 0.85)');
 
     btn.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation(); 
       if (!trackedVideo) return;
+      lastSkipTime = Date.now(); 
       const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
       const skipAmount = isOP ? learnedSkipData.op : learnedSkipData.ed;
+      
+      // ✅ RECORD THE SKIP
+      const oldTime = trackedVideo.currentTime;
       trackedVideo.currentTime += skipAmount;
+      sessionSkips.push({
+        skipType: isOP ? 'op' : 'ed',
+        interval: { startTime: oldTime, endTime: trackedVideo.currentTime }
+      });
+
       showInPageToast('info', 'Smart Skip', `Skipped ${skipAmount}s based on your history!`);
       btn.style.display = 'none';
+      customSkipBtnMounted = false;
+      if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
     });
 
     const container = document.fullscreenElement || document.body;
     container.appendChild(btn);
     customSkipBtnMounted = true;
 
-    // Track the video position and mathematically pin the button to the bottom right (same as Tier 1)
     if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
     customSkipSyncInterval = setInterval(() => {
       if (!trackedVideo) return;
@@ -283,12 +314,16 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       btn.innerHTML = isOP ? `▶ Skip Intro (+${formatTime(skipAmount)})` : `▶ Skip Outro (+${formatTime(skipAmount)})`;
     }, 50);
   }
+
   const trackerIntervalId = setInterval(() => {
     if (!chrome.runtime?.id) {
       clearInterval(trackerIntervalId);
       return; 
     }
     
+    // ✅ MULTI-TAB FIX: If you aren't actively looking at this tab, go to sleep!
+    if (document.visibilityState !== 'visible') return;
+
     if (getActiveMediaType() !== 'ANIME') return;
 
     if (location.href !== currentUrl || (trackedVideo && !trackedVideo.isConnected)) {
@@ -300,6 +335,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       otgLoaded = false;          
       resolvedOtgData = null;  
       aniSkipData = null; 
+      sessionSkips = [];
       if (skipButtonMounted) unmountSkipButton(); 
     }
 
@@ -352,20 +388,28 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         if (skipButtonMounted) unmountSkipButton(); 
       }
 
-      if (aniSkipData && Array.isArray(aniSkipData)) {
-        const ct = trackedVideo.currentTime;
-        const activeSkip = aniSkipData.find(skip => ct >= skip.interval.startTime && ct <= skip.interval.endTime);
-        if (activeSkip) { if (!skipButtonMounted) mountSkipButton(activeSkip); } 
-        else { if (skipButtonMounted) unmountSkipButton(); }
-      }
+      // ✅ ZOMBIE FIX: If we skipped in the last 15 seconds, aggressively kill all remounting attempts
+      if (Date.now() - lastSkipTime < 15000) {
+        if (skipButtonMounted) unmountSkipButton();
+        if (customSkipBtnMounted) {
+          const customBtn = document.getElementById('shiinah-custom-hotzone');
+          if (customBtn) customBtn.style.display = 'none';
+        }
+      } else {
+        if (aniSkipData && Array.isArray(aniSkipData)) {
+          const ct = trackedVideo.currentTime;
+          const activeSkip = aniSkipData.find(skip => ct >= skip.interval.startTime && ct <= skip.interval.endTime);
+          if (activeSkip) { if (!skipButtonMounted) mountSkipButton(activeSkip); } 
+          else { if (skipButtonMounted) unmountSkipButton(); }
+        }
 
-      if (customSkipBtnMounted && trackedVideo && aniSkipData === "not_found") {
-        const customBtn = document.getElementById('shiinah-custom-hotzone');
-        if (customBtn) {
-          const pct = trackedVideo.currentTime / trackedVideo.duration;
-          // ✅ SURGICAL FIX 2: Reveal it as a standard 'block' button instead of 'flex'
-          if (pct < 0.5 || pct > 0.8) customBtn.style.display = 'block';
-          else customBtn.style.display = 'none';
+        if (customSkipBtnMounted && trackedVideo && aniSkipData === "not_found") {
+          const customBtn = document.getElementById('shiinah-custom-hotzone');
+          if (customBtn) {
+            const pct = trackedVideo.currentTime / trackedVideo.duration;
+            if (pct < 0.5 || pct > 0.8) customBtn.style.display = 'block';
+            else customBtn.style.display = 'none';
+          }
         }
       }
 
@@ -383,6 +427,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
           progress: (trackedVideo.currentTime / trackedVideo.duration) * 100,
           threshold: userThreshold,
           currentTime: trackedVideo.currentTime,
+          duration: trackedVideo.duration, // ✅ SEND DURATION
+          aniSkipData: aniSkipData,        // ✅ SEND API DATA
+          sessionSkips: sessionSkips,
           isOtgLoaded: sendOtgStatus,
           resolvedData: resolvedOtgData,
           hasTriggeredUpdate: hasTriggeredUpdate 
@@ -398,18 +445,18 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
               }, async (skipRes) => {
                 if (skipRes && skipRes.found && skipRes.results && skipRes.results.length > 0) {
                   aniSkipData = skipRes.results;
-                  activeSkipTier = "Tier 1: AniSkip API";
+                  activeSkipTier = "AniSkip API";
                 } else {
                   const subResult = await fetchAndAnalyzeSubtitles(trackedVideo.duration);
                   if (subResult && subResult.found) {
                     aniSkipData = [{ skipType: subResult.type, interval: subResult.interval }];
-                    activeSkipTier = "Tier 2: Subtitles";
+                    activeSkipTier = "In-House Data";
                   } else if (typeof hlsSkipData !== 'undefined' && hlsSkipData) {
                     aniSkipData = [hlsSkipData];
-                    activeSkipTier = "Tier 3: HLS Intercept";
+                    activeSkipTier = "HLS Intercept";
                   } else {
                     aniSkipData = "not_found"; 
-                    activeSkipTier = "Tier 4: Learned Behavior";
+                    activeSkipTier = "Learned Behavior";
                     chrome.runtime.sendMessage({ action: "GET_LEARNED_SKIP", mediaId: resolvedOtgData.mediaId }, (learnedRes) => {
                       if (learnedRes) learnedSkipData = learnedRes;
                       if (!customSkipBtnMounted) mountCustomSkipButton();
@@ -439,7 +486,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
                 trackedVideo.addEventListener('canplay', executeSeek, { once: true });
               }
             }
-          // ✅ SURGICAL FIX: Prevent 'fetching' state from getting stuck if undefined
           } else if (response && (response.otgTime === null || response.otgTime === undefined) && otgLoaded === 'fetching') {
             otgLoaded = true; 
           }
@@ -455,7 +501,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         } catch(e) {}
       }
     }
-  }, 1000); 
+  }, 1000);
 
   // ==========================================
   // 📖 MANGA TRACKING ENGINE
@@ -506,6 +552,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       clearInterval(mangaIntervalId);
       return; 
     }
+
+    // ✅ MULTI-TAB FIX: If you aren't actively looking at this tab, go to sleep!
+    if (document.visibilityState !== 'visible') return;
 
     if (getActiveMediaType() !== 'MANGA') return;
 
@@ -629,7 +678,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // ==========================================
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "SHOW_SUCCESS_TOAST") {
-       showInPageToast('success', 'Update Successful', request.message);
+       showInPageToast('success', 'Update Successful', request.message, request.xpData);
        sendResponse({ success: true });
     }
     // ✅ SMART SKIP ROUTER: Checks for exact data before defaulting to 90s
@@ -649,19 +698,31 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       if (!skipped) {
         const isOP = ct < (trackedVideo.duration * 0.5);
         const skipAmount = (aniSkipData === "not_found" && learnedSkipData) ? (isOP ? learnedSkipData.op : learnedSkipData.ed) : 90;
+        
+        // ✅ RECORD THE MANUAL SKIP
+        const oldTime = trackedVideo.currentTime;
         trackedVideo.currentTime += skipAmount;
+        sessionSkips.push({
+          skipType: isOP ? 'op' : 'ed',
+          interval: { startTime: oldTime, endTime: trackedVideo.currentTime }
+        });
+
         showInPageToast('info', 'Skipped', `Skipped forward ${skipAmount} seconds.`);
       }
       sendResponse({ success: true });
     }
+
     else if (request.action === "SKIP_TIME" && trackedVideo) {
       trackedVideo.currentTime += request.amount;
       sendResponse({ success: true });
     }
+
     else if (request.action === "SHOW_RATING_MODAL") {
-      showRatingModal(request.mediaId, request.animeName);
+      showRatingToast(request.mediaId, request.animeName);
       sendResponse({ success: true });
     }
+    
+    
     else if (request.action === "GET_ACTIVE_SKIP_TIER") {
       sendResponse({ tierText: activeSkipTier });
     } else {
@@ -671,7 +732,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     return false; 
   });
 
-  function showInPageToast(type, title, description) {
+  function showInPageToast(type, title, description, xpData = null) {
     const existingToast = document.getElementById('anilist-quick-update-toast');
     if (existingToast) existingToast.remove();
 
@@ -682,7 +743,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       position: 'fixed', top: '20px', right: '-400px', backgroundColor: '#1f1f1f', color: '#ffffff',
       border: '1px solid #333', padding: '14px 18px', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
       zIndex: '2147483647', fontFamily: 'system-ui, -apple-system, sans-serif', display: 'flex',
-      alignItems: 'flex-start', gap: '14px', width: '340px', transition: 'right 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+      flexDirection: 'column', width: '340px', transition: 'right 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
       boxSizing: 'border-box'
     });
 
@@ -695,18 +756,56 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
     const closeSvg = `<svg style="cursor:pointer; opacity:0.5; transition:opacity 0.2s;" width="18" height="18" fill="none" stroke="#aaa" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
 
+    // ✅ SURGICAL FIX 2: Execute Profile.js Math to calculate real XP bar widths
+    let xpHtml = '';
+    let animStyleHtml = '';
+    
+    if (type === 'success' && xpData) {
+      const lvl = xpData.level;
+      const currentLevelBaseMins = 500000 * Math.pow((lvl - 1) / 99, 2);
+      const nextLevelMins = 500000 * Math.pow(lvl / 99, 2);
+      
+      const minsRequiredForNext = nextLevelMins - currentLevelBaseMins;
+      const previousTotalMins = xpData.totalMinutes - xpData.gainedMins;
+      
+      const prevMinsIntoLevel = previousTotalMins - currentLevelBaseMins;
+      const currentMinsIntoLevel = xpData.totalMinutes - currentLevelBaseMins;
+
+      const previousPct = Math.min(100, Math.max(0, (prevMinsIntoLevel / minsRequiredForNext) * 100));
+      const currentPct = Math.min(100, Math.max(0, (currentMinsIntoLevel / minsRequiredForNext) * 100));
+      const gainedPct = currentPct - previousPct;
+
+      animStyleHtml = `<style>@keyframes shiinah-xp-fill { to { width: ${gainedPct}%; } }</style>`;
+
+      xpHtml = `
+        <div style="margin-top: 14px; width: 100%; border-top: 1px solid #2b3a4a; padding-top: 12px;">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: #fff; margin-bottom: 6px; font-weight: bold;">
+            <span>Progress to Lv. ${lvl + 1}</span>
+            <span style="color: #E5C07B;">+${xpData.gainedMins} XP</span>
+          </div>
+          <div style="width: 100%; background: #1a2636; border-radius: 6px; height: 8px; overflow: hidden; position: relative;" title="${Math.floor(xpData.totalMinutes).toLocaleString()} / ${Math.floor(nextLevelMins).toLocaleString()} XP">
+            <div style="position: absolute; top: 0; left: 0; height: 100%; width: ${previousPct}%; background: #E5C07B; border-radius: 6px;"></div>
+            <div style="position: absolute; top: 0; left: ${previousPct}%; height: 100%; width: 0%; background: #4cca51; animation: shiinah-xp-fill 1.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.4s forwards; border-radius: 0 6px 6px 0;"></div>
+          </div>
+        </div>
+      `;
+    }
+
     toast.innerHTML = `
-      <div style="flex-shrink: 0; margin-top: 1px;">${icons[type] || icons.info}</div>
-      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px;">
-        <span style="font-size: 15px; font-weight: 600; color: #fff; line-height: 1.2; letter-spacing: 0.3px;">${title}</span>
-        <span style="font-size: 13px; font-weight: 400; color: #aaa; line-height: 1.4;">${description}</span>
+      ${animStyleHtml}
+      <div style="display: flex; gap: 14px; align-items: flex-start;">
+        <div style="flex-shrink: 0; margin-top: 1px;">${icons[type] || icons.info}</div>
+        <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px;">
+          <span style="font-size: 15px; font-weight: 600; color: #fff; line-height: 1.2; letter-spacing: 0.3px;">${title}</span>
+          <span style="font-size: 13px; font-weight: 400; color: #aaa; line-height: 1.4;">${description}</span>
+        </div>
+        <div class="toast-close-btn" style="flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 2px;">
+          ${closeSvg}
+        </div>
       </div>
-      <div class="toast-close-btn" style="flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 2px;">
-        ${closeSvg}
-      </div>
+      ${xpHtml}
     `;
 
-    // ✅ SURGICAL FIX: Attach to fullscreen element so it isn't hidden behind the video player
     const container = document.fullscreenElement || document.body;
     container.appendChild(toast);
 
@@ -724,74 +823,122 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     }, 5000); 
   }
 
-  function showRatingModal(mediaId, animeName) {
-    const existing = document.getElementById('anilist-rating-modal-container');
+  function showRatingToast(mediaId, animeName) {
+    const existing = document.getElementById('shiinah-rating-toast-container');
     if (existing) existing.remove();
 
+    if (!document.getElementById('shiinah-rating-css')) {
+      const style = document.createElement('style');
+      style.id = 'shiinah-rating-css';
+      style.textContent = `
+        #shiinah-score-slider { -webkit-appearance: none; width: 100%; height: 6px; background: linear-gradient(to right, #3db4f2 50%, #2b3a4a 50%); border-radius: 3px; outline: none; margin-top: 30px; }
+        #shiinah-score-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #2b3a4a; border: 4px solid #fff; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.5); margin-top: -7px; }
+        #shiinah-score-slider::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; }
+        .shiinah-slider-wrapper { position: relative; width: 100%; display: flex; flex-direction: column; align-items: center; padding: 20px 10px; box-sizing: border-box; }
+        .shiinah-tooltip-bubble { position: absolute; top: -5px; background: #2b3a4a; color: #fff; padding: 6px 12px; border-radius: 8px; text-align: center; transform: translateX(-50%); white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.5); pointer-events: none; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .shiinah-tooltip-bubble::after { content: ''; position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%); border-width: 6px 6px 0; border-style: solid; border-color: #2b3a4a transparent transparent transparent; }
+        .shiinah-bubble-text { font-size: 11px; color: #9fadbd; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
+        .shiinah-bubble-num { font-size: 18px; font-weight: 900; color: #fff; line-height: 1; }
+      `;
+      document.head.appendChild(style);
+    }
+
     const container = document.createElement('div');
-    container.id = 'anilist-rating-modal-container';
+    container.id = 'shiinah-rating-toast-container';
+    
     Object.assign(container.style, {
-      position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
-      backgroundColor: 'rgba(0, 0, 0, 0.85)', zIndex: '2147483647',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
-    });
-
-    const modal = document.createElement('div');
-    Object.assign(modal.style, {
+      position: 'fixed', bottom: '30px', right: '30px',
       backgroundColor: '#1f1f1f', border: '1px solid #333',
-      padding: '24px', borderRadius: '12px', width: '320px',
-      boxShadow: '0 10px 40px rgba(0,0,0,0.9)', color: '#fff',
-      display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'center'
+      padding: '20px', borderRadius: '12px', width: '320px',
+      boxShadow: '0 10px 40px rgba(0,0,0,0.8)', color: '#fff',
+      zIndex: '2147483647', fontFamily: 'system-ui, -apple-system, sans-serif',
+      display: 'flex', flexDirection: 'column', gap: '8px',
+      animation: 'shiinah-slide-up 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+      transition: 'opacity 0.5s ease',
+      opacity: '1'
     });
 
-    modal.innerHTML = `
-      <div>
-        <h2 style="margin: 0 0 8px 0; font-size: 20px; color: #4cca51;">Series Completed! 🎉</h2>
-        <p style="margin: 0; font-size: 14px; color: #aaa; line-height: 1.4;">You finished <b style="color: #fff;">${animeName}</b>. How would you rate it?</p>
+    container.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div style="flex-grow: 1;">
+              <h3 style="margin: 0 0 4px 0; font-size: 16px; color: #3db4f2;">Series Completed! 🎉</h3>
+              <p style="margin: 0; font-size: 12px; color: #aaa; line-height: 1.4; padding-right: 15px;">Rate <b style="color: #fff;">${animeName}</b></p>
+          </div>
+          <button id="shiinah-rating-close" style="background: transparent; border: none; color: #aaa; cursor: pointer; font-size: 18px; line-height: 1; padding: 0;">✕</button>
       </div>
-      <input type="number" id="anilist-score-input" min="0" max="100" placeholder="Score (0-100)" style="
-        background-color: #0b1119; color: #fff; border: 1px solid #333;
-        padding: 12px; border-radius: 8px; font-size: 18px; text-align: center;
-        outline: none; width: 100%; box-sizing: border-box; font-weight: bold;
-      ">
-      <div style="display: flex; gap: 10px; margin-top: 5px;">
-        <button id="anilist-skip-rating" style="
-          flex: 1; padding: 12px; background: transparent; color: #aaa;
-          border: 1px solid #555; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s;
-        ">Skip</button>
-        <button id="anilist-submit-rating" style="
-          flex: 1; padding: 12px; background: #3db4f2; color: #fff;
-          border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s;
-        ">Submit</button>
+      <div class="shiinah-slider-wrapper">
+          <div id="shiinah-tooltip-bubble" class="shiinah-tooltip-bubble" style="left: 50%;">
+              <span id="shiinah-bubble-text" class="shiinah-bubble-text">Fine</span>
+              <span id="shiinah-bubble-num" class="shiinah-bubble-num">50</span>
+          </div>
+          <input type="range" id="shiinah-score-slider" min="0" max="100" value="50">
       </div>
+      <button id="shiinah-submit-rating" style="width: 100%; padding: 12px; margin-top: 10px; background: #3db4f2; color: #0b1119; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s;">Submit Score</button>
     `;
 
-    container.appendChild(modal);
     document.body.appendChild(container);
 
-    const skipBtn = document.getElementById('anilist-skip-rating');
-    const submitBtn = document.getElementById('anilist-submit-rating');
-    const scoreInput = document.getElementById('anilist-score-input');
+    const slider = document.getElementById('shiinah-score-slider');
+    const bubble = document.getElementById('shiinah-tooltip-bubble');
+    const bubbleText = document.getElementById('shiinah-bubble-text');
+    const bubbleNum = document.getElementById('shiinah-bubble-num');
+    const submitBtn = document.getElementById('shiinah-submit-rating');
+    const closeBtn = document.getElementById('shiinah-rating-close');
 
-    skipBtn.addEventListener('mouseenter', () => skipBtn.style.color = '#fff');
-    skipBtn.addEventListener('mouseleave', () => skipBtn.style.color = '#aaa');
-    submitBtn.addEventListener('mouseenter', () => submitBtn.style.backgroundColor = '#2c9ad1');
-    submitBtn.addEventListener('mouseleave', () => submitBtn.style.backgroundColor = '#3db4f2');
+    const getRatingText = (val) => {
+        if (val >= 95) return "Masterpiece";
+        if (val >= 85) return "Great";
+        if (val >= 75) return "Very Good";
+        if (val >= 65) return "Good";
+        if (val >= 50) return "Fine";
+        if (val >= 40) return "Average";
+        if (val >= 30) return "Bad";
+        if (val >= 20) return "Very Bad";
+        if (val >= 10) return "Horrible";
+        return "Appalling";
+    };
 
-    skipBtn.addEventListener('click', () => container.remove());
+    slider.addEventListener('input', (e) => {
+        const val = e.target.value;
+        slider.style.background = `linear-gradient(to right, #3db4f2 ${val}%, #2b3a4a ${val}%)`;
+        bubbleNum.textContent = val;
+        bubbleText.textContent = getRatingText(val);
+        
+        const thumbWidth = 20;
+        const percent = val / 100;
+        const pixelOffset = (thumbWidth / 2) - (thumbWidth * percent);
+        bubble.style.left = `calc(${val}% + ${pixelOffset}px)`;
+    });
+
+    // Fade Logic implementation
+    let fadeTimer;
+    const triggerFadeOut = () => {
+      container.style.opacity = '1';
+      clearTimeout(fadeTimer);
+      fadeTimer = setTimeout(() => { container.style.opacity = '0.04'; }, 5000);
+    };
+
+    container.addEventListener('mousemove', triggerFadeOut);
+    container.addEventListener('mouseenter', () => {
+      container.style.opacity = '1';
+      clearTimeout(fadeTimer);
+    });
+    container.addEventListener('mouseleave', triggerFadeOut);
+    
+    // Initialize fade timer on creation
+    triggerFadeOut();
+
+    closeBtn.addEventListener('click', () => container.remove());
+    submitBtn.addEventListener('mouseenter', () => submitBtn.style.opacity = '0.8');
+    submitBtn.addEventListener('mouseleave', () => submitBtn.style.opacity = '1');
 
     submitBtn.addEventListener('click', () => {
-      const score = parseInt(scoreInput.value, 10);
-      if (isNaN(score) || score < 0 || score > 100) {
-        scoreInput.style.borderColor = '#e74c3c';
-        return;
-      }
-      submitBtn.textContent = 'Saving...';
-      submitBtn.disabled = true;
-      chrome.runtime.sendMessage({ action: "SAVE_ANIME_SCORE", mediaId, score }, () => {
-        container.remove();
-      });
+        submitBtn.textContent = 'Saving...';
+        submitBtn.disabled = true;
+        chrome.runtime.sendMessage({ action: "SAVE_ANIME_SCORE", mediaId, score: parseInt(slider.value, 10) }, () => {
+            container.remove();
+            showInPageToast('success', 'Score Saved', `Your rating for ${animeName} was successfully saved!`);
+        });
     });
   }
 
@@ -1222,31 +1369,42 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       `;
     }
 
+    // Inject the CSS for the spinner
+    if (!document.getElementById('shiinah-spinner-style')) {
+      const style = document.createElement('style');
+      style.id = 'shiinah-spinner-style';
+      style.textContent = `@keyframes shiinah-spin { 100% { transform: rotate(360deg); } }`;
+      document.head.appendChild(style);
+    }
+
     tooltip.innerHTML = `
       <div class="shiinah-status-header">${headerHtml}</div>
-      <div class="shiinah-switcher-bar" style="display: flex; gap: 6px; justify-content: center; border-bottom: 1px solid #1a2636; padding-bottom: 8px;">
-        <button class="shiinah-stat-tab active-tab" data-platform="al" style="background: #3db4f2; color: #0b1119; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">AL Stats</button>
-        <button class="shiinah-stat-tab" data-platform="mal" style="background: #1a2636; color: #9fadbd; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer;">MAL Stats</button>
+      <div class="shiinah-stats-body">
+        <div style="display:flex; flex-direction:column; align-items:center; gap:8px; padding: 20px;">
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:24px; height:24px; color:#3db4f2; animation: shiinah-spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+           <span style="color:#9fadbd; font-size:12px; font-weight:bold;">Fetching live data...</span>
+        </div>
       </div>
-      <div class="shiinah-stats-body"><div style="text-align: center; color: #677b94; font-size: 12px; padding: 15px;">Loading details...</div></div>
     `;
 
     document.body.appendChild(tooltip);
 
     let cachedStats = null;
-    let currentPlatform = 'al';
 
-    function renderChart(platformKey) {
+    // ✅ SURGICAL FIX: Safely render the single AniList chart and eliminate the ReferenceError
+    function renderCharts() {
       const statsBody = tooltip.querySelector('.shiinah-stats-body');
-      const activeData = cachedStats ? cachedStats[platformKey] : null;
+      if (!statsBody) return;
 
       if (cachedStats?.meta?.status) {
         const statusEl = tooltip.querySelector('.shiinah-media-status');
         if (statusEl) statusEl.textContent = `Status: ${formatStatusLabel(cachedStats.meta.status)}`;
       }
-      
+
+      const activeData = cachedStats?.al;
+
       if (!activeData || !activeData.scoreDistribution || activeData.scoreDistribution.length === 0) {
-        statsBody.innerHTML = `<div style="text-align: center; color: #e74c3c; font-size: 12px; padding: 15px;">No ${platformKey.toUpperCase()} distribution available</div>`;
+        statsBody.innerHTML = `<div style="text-align: center; color: #e74c3c; font-size: 10px; padding: 8px 0; border-top: 1px solid #1a2636; margin-top: 6px;">No score distribution available</div>`;
         return;
       }
 
@@ -1261,26 +1419,19 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         barsHtml += `
           <div style="display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; min-width: 18px;">
             <div style="font-size: 8px; color: #9fadbd; height: 14px; display: flex; align-items: flex-end;">${scoreObj.amount > 999 ? (scoreObj.amount/1000).toFixed(1)+'k' : scoreObj.amount}</div>
-            <div style="width: 10px; height: 55px; display: flex; align-items: flex-end; justify-content: center;">
+            <div style="width: 10px; height: 50px; display: flex; align-items: flex-end; justify-content: center;">
               <div style="width: 100%; height: ${heightPct}%; background-color: ${barColor}; border-radius: 3px;"></div>
             </div>
             <div style="font-size: 9px; color: #677b94; font-weight: bold; margin-top: 2px;">${scoreObj.score}</div>
           </div>
         `;
       });
-      statsBody.innerHTML = `<div style="font-size: 11px; color: #9fadbd; font-weight: bold; margin-bottom: 6px; text-transform: uppercase;">SCORE DISTRIBUTION (${platformKey.toUpperCase()})</div><div style="display: flex; align-items: flex-end; justify-content: space-between; height: 80px; border-bottom: 1px solid #2b3a4a; padding-bottom: 2px;">${barsHtml}</div>`;
+      
+      statsBody.innerHTML = `
+        <div style="font-size: 10px; color: #9fadbd; font-weight: bold; margin-top: 6px; margin-bottom: 2px; text-transform: uppercase; border-top: 1px solid #1a2636; padding-top: 6px;">SCORE DISTRIBUTION</div>
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; height: 75px; padding-bottom: 2px;">${barsHtml}</div>
+      `;
     }
-
-    tooltip.querySelectorAll('.shiinah-stat-tab').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        tooltip.querySelectorAll('.shiinah-stat-tab').forEach(b => { b.style.background = '#1a2636'; b.style.color = '#9fadbd'; });
-        btn.style.background = btn.getAttribute('data-platform') === 'al' ? '#3db4f2' : '#2E51A2'; 
-        btn.style.color = '#fff';
-        currentPlatform = btn.getAttribute('data-platform');
-        renderChart(currentPlatform);
-      });
-    });
 
     let hideTimeout;
     let fetchIntentTimeout;
@@ -1310,10 +1461,16 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
             
             if (isWatchlisted) {
               const mediaType = (entry.media && entry.media.format === 'MANGA') ? 'MANGA' : (isMangaCard ? 'MANGA' : 'ANIME');
+              console.log("[Shiinah UI] Requesting stats for ID:", media.id);
+              
               chrome.runtime.sendMessage({ action: "FETCH_MEDIA_STATS", mediaId: media.id, malId: media.idMal, mediaType: mediaType }, (res) => {
-                cachedStats = res?.stats || { al: null, mal: null, meta: null };
-                renderChart(currentPlatform);
+                if (chrome.runtime.lastError) console.error("[Shiinah UI] Message Error:", chrome.runtime.lastError.message);
+                console.log("[Shiinah UI] Stats received:", res);
+                
+                cachedStats = res?.stats || { al: null, meta: null };
+                renderCharts();
               });
+              
               const linkContainer = tooltip.querySelector('.shiinah-view-links');
               if (linkContainer && !linkContainer.hasChildNodes()) {
                 if (media.id > 0 && !media.isMalOnly) {
@@ -1333,15 +1490,24 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
                 }
               }
             } else {
-              const fetchMedia = (type) => new Promise(resolve => chrome.runtime.sendMessage({ action: "SEARCH_AND_FETCH_STATS", title: rawText, mediaType: type }, resolve));
+              console.log("[Shiinah UI] Searching stats for title:", rawText);
+              const fetchMedia = (type) => new Promise(resolve => {
+                  chrome.runtime.sendMessage({ action: "SEARCH_AND_FETCH_STATS", title: rawText, mediaType: type }, (res) => {
+                      if (chrome.runtime.lastError) console.error("[Shiinah UI] Message Error:", chrome.runtime.lastError.message);
+                      resolve(res);
+                  });
+              });
+              
               let animeRes = null; let mangaRes = null;
               if (isAnimeCard && !isMangaCard) animeRes = await fetchMedia('ANIME');
               else if (isMangaCard && !isAnimeCard) mangaRes = await fetchMedia('MANGA');
               else [animeRes, mangaRes] = await Promise.all([fetchMedia('ANIME'), fetchMedia('MANGA')]);
 
               const primaryRes = isMangaCard ? (mangaRes?.media ? mangaRes : animeRes) : (animeRes?.media ? animeRes : mangaRes);
-              cachedStats = primaryRes?.stats || { al: null, mal: null, meta: null };
-              renderChart(currentPlatform);
+              console.log("[Shiinah UI] Search resolved:", primaryRes);
+              
+              cachedStats = primaryRes?.stats || { al: null, meta: null };
+              renderCharts();
 
               const btnContainer = tooltip.querySelector('.shiinah-add-btn-container');
               if (btnContainer && (animeRes?.media?.id || mangaRes?.media?.id)) {
@@ -1377,7 +1543,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
                   }
 
                   if (mediaData.idMal || mediaData.isMalOnly) {
-                    const malLink = document.createElement('a'); malLink.textContent = 'View in MAL'; malLink.href = `https://myanimelist.net/${type.toLowerCase()}/${mediaData.isMalOnly ? mediaData.idMal : mediaData.idMal}`; malLink.target = '_blank';
+                    const malLink = document.createElement('a'); malLink.textContent = 'View in MAL';
+                    malLink.href = `https://myanimelist.net/${type.toLowerCase()}/${mediaData.isMalOnly ? mediaData.idMal : mediaData.idMal}`; malLink.target = '_blank';
                     Object.assign(malLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#5C7CE5', border: '1px solid #2E51A2', padding: '4px 0', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
                     malLink.onmouseenter = () => { malLink.style.background = '#2E51A2'; malLink.style.color = '#fff'; }; malLink.onmouseleave = () => { malLink.style.background = 'transparent'; malLink.style.color = '#5C7CE5'; }; malLink.onclick = (e) => e.stopPropagation();
                     linksRow.appendChild(malLink);
@@ -1392,7 +1559,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
                 if (mangaGroup) btnContainer.appendChild(mangaGroup);
               }
             }
-          } catch(e) { console.log("[Shiinah] Fetch Intent Error:", e); }
+          } catch(e) { console.error("[Shiinah UI] Fetch Intent Error:", e); }
         }, 300); 
       }
     };

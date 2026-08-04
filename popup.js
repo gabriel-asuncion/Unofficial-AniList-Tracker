@@ -1141,7 +1141,6 @@ function showAutoDetectView(media, progressNum, detectedType) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender) => {
-
   // --- EXISTING VIDEO LISTENER ---
   if (message.action === "LIVE_VIDEO_PROGRESS") {
     const pct = message.progress.toFixed(1);
@@ -1152,6 +1151,48 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     if (progressBar && progressText) {
       progressBar.style.width = visualPct + '%';
       progressText.textContent = `Video Progress: ${pct}%`;
+    }
+
+    // ✅ NEW: INTRO/OUTRO MARKER RENDERING
+    const container = document.getElementById('video-progress-container');
+    if (container && message.duration) {
+      container.style.position = 'relative'; // Ensure absolute markers align correctly
+      
+      let markerContainer = document.getElementById('video-markers');
+      if (!markerContainer) {
+        markerContainer = document.createElement('div');
+        markerContainer.id = 'video-markers';
+        markerContainer.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
+        container.appendChild(markerContainer);
+      }
+      
+      // Decide which data to draw: Priority to API data, fallback to performed session skips
+      let skipsToDraw = [];
+      if (Array.isArray(message.aniSkipData)) {
+         skipsToDraw = message.aniSkipData;
+      } else if (message.sessionSkips && message.sessionSkips.length > 0) {
+         skipsToDraw = message.sessionSkips;
+      }
+
+      markerContainer.innerHTML = ''; // Clear old markers
+      
+      skipsToDraw.forEach(skip => {
+        if (!skip.interval || !skip.interval.startTime || !skip.interval.endTime) return;
+        
+        const startPct = (skip.interval.startTime / message.duration) * 100;
+        const endPct = (skip.interval.endTime / message.duration) * 100;
+        const widthPct = endPct - startPct;
+        
+        const isOP = skip.skipType === 'op';
+        const color = isOP ? '#f1c40f' : '#e67e22'; // Yellow for OP, Orange for ED
+        const label = isOP ? 'INTRO' : 'OUTRO';
+        
+        markerContainer.innerHTML += `
+          <div style="position: absolute; left: ${startPct}%; width: ${widthPct}%; height: 100%; background: ${color}; opacity: 0.85; z-index: 2; border-radius: 2px;">
+            <span style="position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: bold; color: #fff; text-shadow: 0 1px 2px #000; letter-spacing: 0.5px;">${label}</span>
+          </div>
+        `;
+      });
     }
 
     if (message.progress >= currentThreshold) {

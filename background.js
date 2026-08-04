@@ -433,8 +433,9 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
         }
       }
 
+      let xpData = null;
       if (storage.anilistUserId) {
-        syncUserStatsToSupabase(storage.anilistUserId, trueWatchSeconds);
+        xpData = await syncUserStatsToSupabase(storage.anilistUserId, trueWatchSeconds);
       }
       
     } else if (media.episodes && currentProg >= media.episodes) {
@@ -460,10 +461,10 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
     }
 
     if (isCompleted) {
-      // ✅ SURGICAL FIX 1: Catch the harmless unresolved promise error
       chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, malId: media.idMal, isMalOnly: media.isMalOnly, animeName: animeName, mediaType: 'ANIME' }, { frameId: frameId }).catch(() => {});
     } else if (updatedPlatforms.length > 0) {
-      chrome.tabs.sendMessage(tabId, { action: "SHOW_SUCCESS_TOAST", message: toastMessage }, { frameId: frameId }).catch(() => {}); 
+      // ✅ Inject the XP payload into the Success Toast
+      chrome.tabs.sendMessage(tabId, { action: "SHOW_SUCCESS_TOAST", message: toastMessage, xpData: xpData }, { frameId: frameId }).catch(() => {}); 
     }
 
   } catch (error) {
@@ -662,7 +663,7 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
 }
 
 async function syncUserStatsToSupabase(userId, addedSeconds, isRetroactive = false) {
-  if (!isRetroactive && (!addedSeconds || addedSeconds < 5)) return;
+  if (!isRetroactive && (!addedSeconds || addedSeconds < 5)) return null;
 
   try {
     const storage = await chrome.storage.local.get(['anilistUsername', 'anilistAvatar', 'timeSavedSeconds']);
@@ -749,7 +750,18 @@ async function syncUserStatsToSupabase(userId, addedSeconds, isRetroactive = fal
         tracking_data: trackingData
       })
     });
-  } catch (error) { console.error("Sync Failed:", error); }
+
+    // ✅ SURGICAL FIX 1: Return the exact XP data needed for the Toast UI animation
+    return {
+      level: newLevel,
+      totalMinutes: totalMinutes,
+      gainedMins: Math.floor(addedSeconds / 60)
+    };
+
+  } catch (error) { 
+    console.error("Sync Failed:", error); 
+    return null;
+  }
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -815,11 +827,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     chrome.storage.local.get(['anilistToken', cacheKey], async (res) => {
       if (res[cacheKey] && (Date.now() - res[cacheKey].timestamp < 86400000)) {
+        console.log(`[Shiinah API] Using cached stats for ID: ${message.mediaId}`);
         sendResponse({ stats: res[cacheKey].data }); 
         return;
       }
 
-      let stats = { al: null, mal: null, meta: null };
+      console.log(`[Shiinah API] Fetching fresh stats for ID: ${message.mediaId}`);
+      let stats = { al: null, meta: null };
 
       if (res.anilistToken) {
         const alQuery = `query($id: Int) { Media(id: $id) { status format chapters episodes stats { scoreDistribution { score amount } } } }`;
@@ -833,34 +847,105 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               episodes: alRes.data.Media.episodes,
               format: alRes.data.Media.format
             };
-          }
-        } catch (e) {}
-      }
-
-      if (message.malId) {
-        try {
-          const endpoint = message.mediaType === 'MANGA' ? 'manga' : 'anime';
-          const jikanRes = await fetch(`https://api.jikan.moe/v4/${endpoint}/${message.malId}/statistics`);
-          if (jikanRes.ok) {
-            const jikanData = await jikanRes.json();
-            if (jikanData?.data?.scores) {
-              const malScores = jikanData.data.scores.map(s => ({ score: s.score * 10, amount: s.votes }));
-              stats.mal = { scoreDistribution: malScores };
-            }
+            console.log(`[Shiinah API] AniList stats fetched successfully.`);
           }
         } catch (e) {
-          console.log("[Shiinah] Jikan Error:", e);
+          console.error(`[Shiinah API] AniList fetch failed:`, e);
         }
       }
 
-      if (stats.al || stats.mal) {
+      if (stats.al) {
         chrome.storage.local.set({ [cacheKey]: { timestamp: Date.now(), data: stats } });
       }
       
+      console.log(`[Shiinah API] Sending stats back to UI:`, stats);
       sendResponse({ stats: stats }); 
     });
     return true; 
   }
+
+  // --- INLINE TRACKING: SEARCH & FETCH FOR UNLISTED SHOWS ---
+  else if (message.action === "SEARCH_AND_FETCH_STATS") {
+    chrome.storage.local.get(['anilistToken', 'malToken'], async (res) => {
+      try {
+        let searchTitle = message.title
+          .replace(/\.{3}$/g, '') 
+          .replace(/Ep\s*\d+/i, '') 
+          .replace(/Ch\s*\d+/i, '')
+          .replace(/Season\s*\d+/i, '') 
+          .replace(/[^\w\s]/g, ' ') 
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const mediaType = message.mediaType || 'ANIME';
+        console.log(`[Shiinah Search] Looking up unlisted title: "${searchTitle}"`);
+        
+        const searchQuery = `query ($search: String) { Media (search: $search, type: ${mediaType}, sort: SEARCH_MATCH) { id idMal status format chapters episodes title { romaji english } mediaListEntry { id progress status } } }`;
+        let searchRes = await apiRequest(searchQuery, { search: searchTitle }, res.anilistToken);
+        
+        if (!searchRes.data?.Media) {
+          let shortTitle = searchTitle.split(' ').slice(0, 3).join(' ');
+          searchRes = await apiRequest(searchQuery, { search: shortTitle }, res.anilistToken);
+        }
+
+        let media = searchRes.data?.Media || null;
+
+        if (!media && res.malToken) {
+          try {
+            const endpoint = mediaType === 'MANGA' ? 'manga' : 'anime';
+            const malSearch = await malApiRequest(`${endpoint}?q=${encodeURIComponent(searchTitle)}&limit=1&fields=id,title,alternative_titles,main_picture,status,num_chapters,num_episodes`, 'GET', null, res.malToken);
+            if (malSearch.data?.length > 0) {
+              const malNode = malSearch.data[0].node;
+              media = standardizeMalMedia(malNode, null, mediaType);
+            }
+          } catch(e) {}
+        }
+
+        if (!media) {
+          console.log(`[Shiinah Search] No media found for: "${searchTitle}"`);
+          sendResponse({ error: "Not found" });
+          return;
+        }
+
+        if (!media.idMal && !media.isMalOnly && res.malToken) {
+          try {
+            const endpoint = mediaType === 'MANGA' ? 'manga' : 'anime';
+            const officialTitle = media.title.english || media.title.romaji;
+            let malSearch = await malApiRequest(`${endpoint}?q=${encodeURIComponent(officialTitle)}&limit=1`, 'GET', null, res.malToken);
+            
+            if ((!malSearch.data || malSearch.data.length === 0) && media.title.romaji) {
+               malSearch = await malApiRequest(`${endpoint}?q=${encodeURIComponent(media.title.romaji)}&limit=1`, 'GET', null, res.malToken);
+            }
+
+            if (malSearch.data?.length > 0) {
+              media.idMal = malSearch.data[0].node.id;
+            }
+          } catch(e) {}
+        }
+
+        let stats = { al: null, meta: { status: media.status, chapters: media.chapters, episodes: media.episodes, format: media.format } };
+
+        if (res.anilistToken && media.id > 0) {
+          const alQuery = `query($id: Int) { Media(id: $id) { stats { scoreDistribution { score amount } } } }`;
+          try {
+            const alRes = await apiRequest(alQuery, { id: media.id }, res.anilistToken);
+            stats.al = alRes.data?.Media?.stats || null;
+            console.log(`[Shiinah Search] Search stats mapped successfully.`);
+          } catch (e) {
+            console.error(`[Shiinah Search] Search stats fetch failed:`, e);
+          }
+        }
+
+        console.log(`[Shiinah Search] Sending search stats back to UI:`, stats);
+        sendResponse({ stats: stats, media: media });
+      } catch (e) {
+        console.error(`[Shiinah Search] Fatal search error:`, e);
+        sendResponse({ error: e.message });
+      }
+    });
+    return true; 
+  }
+
   // --- INLINE TRACKING: SEARCH & FETCH FOR UNLISTED SHOWS ---
   else if (message.action === "SEARCH_AND_FETCH_STATS") {
     chrome.storage.local.get(['anilistToken', 'malToken'], async (res) => {
@@ -919,7 +1004,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } catch(e) {}
         }
 
-        let stats = { al: null, mal: null, meta: { status: media.status, chapters: media.chapters, episodes: media.episodes, format: media.format } };
+        let stats = { al: null, meta: { status: media.status, chapters: media.chapters, episodes: media.episodes, format: media.format } };
 
         if (res.anilistToken && media.id > 0) {
           const alQuery = `query($id: Int) { Media(id: $id) { stats { scoreDistribution { score amount } } } }`;
@@ -927,21 +1012,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const alRes = await apiRequest(alQuery, { id: media.id }, res.anilistToken);
             stats.al = alRes.data?.Media?.stats || null;
           } catch (e) {}
-        }
-
-        const targetMalId = media.isMalOnly ? media.idMal : media.idMal;
-        if (targetMalId) {
-          try {
-            const endpoint = mediaType === 'MANGA' ? 'manga' : 'anime';
-            const jikanRes = await fetch(`https://api.jikan.moe/v4/${endpoint}/${targetMalId}/statistics`);
-            if (jikanRes.ok) {
-              const jikanData = await jikanRes.json();
-              if (jikanData?.data?.scores) {
-                const malScores = jikanData.data.scores.map(s => ({ score: s.score * 10, amount: s.votes }));
-                stats.mal = { scoreDistribution: malScores };
-              }
-            }
-          } catch (e) { console.log("[Shiinah] Jikan Error:", e); }
         }
 
         sendResponse({ stats: stats, media: media });
