@@ -1141,7 +1141,7 @@ function showAutoDetectView(media, progressNum, detectedType) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender) => {
-  // --- EXISTING VIDEO LISTENER ---
+  // --- VIDEO PROGRESS LISTENER ---
   if (message.action === "LIVE_VIDEO_PROGRESS") {
     const pct = message.progress.toFixed(1);
     const progressBar = document.getElementById('video-progress-bar');
@@ -1153,43 +1153,45 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       progressText.textContent = `Video Progress: ${pct}%`;
     }
 
-    // ✅ NEW: INTRO/OUTRO MARKER RENDERING
+    // ✅ RENDER INTRO/OUTRO MARKERS & LABELS
     const container = document.getElementById('video-progress-container');
     if (container && message.duration) {
-      container.style.position = 'relative'; // Ensure absolute markers align correctly
+      container.style.position = 'relative'; 
       
-      let markerContainer = document.getElementById('video-markers');
-      if (!markerContainer) {
-        markerContainer = document.createElement('div');
-        markerContainer.id = 'video-markers';
-        markerContainer.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;';
-        container.appendChild(markerContainer);
-      }
-      
-      // Decide which data to draw: Priority to API data, fallback to performed session skips
-      let skipsToDraw = [];
-      if (Array.isArray(message.aniSkipData)) {
-         skipsToDraw = message.aniSkipData;
-      } else if (message.sessionSkips && message.sessionSkips.length > 0) {
-         skipsToDraw = message.sessionSkips;
+      let markerOverlay = document.getElementById('video-markers-overlay');
+      if (!markerOverlay) {
+        markerOverlay = document.createElement('div');
+        markerOverlay.id = 'video-markers-overlay';
+        markerOverlay.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible;';
+        container.appendChild(markerOverlay);
       }
 
-      markerContainer.innerHTML = ''; // Clear old markers
-      
+      // Priority: Tier 1/2 API data first; Fall back to manual session skips (Tier 3/4)
+      let skipsToDraw = [];
+      if (Array.isArray(message.aniSkipData) && message.aniSkipData.length > 0) {
+        skipsToDraw = message.aniSkipData;
+      } else if (Array.isArray(message.sessionSkips) && message.sessionSkips.length > 0) {
+        skipsToDraw = message.sessionSkips;
+      }
+
+      markerOverlay.innerHTML = '';
+
       skipsToDraw.forEach(skip => {
-        if (!skip.interval || !skip.interval.startTime || !skip.interval.endTime) return;
-        
-        const startPct = (skip.interval.startTime / message.duration) * 100;
-        const endPct = (skip.interval.endTime / message.duration) * 100;
-        const widthPct = endPct - startPct;
-        
+        if (!skip.interval || skip.interval.startTime == null || skip.interval.endTime == null) return;
+
+        const startPct = Math.max(0, (skip.interval.startTime / message.duration) * 100);
+        const endPct = Math.min(100, (skip.interval.endTime / message.duration) * 100);
+        const widthPct = Math.max(1, endPct - startPct);
+
         const isOP = skip.skipType === 'op';
-        const color = isOP ? '#f1c40f' : '#e67e22'; // Yellow for OP, Orange for ED
-        const label = isOP ? 'INTRO' : 'OUTRO';
-        
-        markerContainer.innerHTML += `
-          <div style="position: absolute; left: ${startPct}%; width: ${widthPct}%; height: 100%; background: ${color}; opacity: 0.85; z-index: 2; border-radius: 2px;">
-            <span style="position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: bold; color: #fff; text-shadow: 0 1px 2px #000; letter-spacing: 0.5px;">${label}</span>
+        const blockColor = isOP ? '#FFD345' : '#E67E22';
+        const labelText = isOP ? 'INTRO' : 'OUTRO';
+
+        markerOverlay.innerHTML += `
+          <div style="position: absolute; left: ${startPct}%; width: ${widthPct}%; height: 100%; background-color: ${blockColor}; opacity: 0.85; border-radius: 3px; z-index: 2;">
+            <span style="position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 900; color: #ffffff; letter-spacing: 0.5px; text-shadow: 0 1px 3px rgba(0,0,0,0.8); white-space: nowrap;">
+              ${labelText}
+            </span>
           </div>
         `;
       });

@@ -362,11 +362,12 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
     }
 
     const { media, episode, token } = result;
-    const intEpisode = Math.floor(episode); // FIX: Ensure integer progress
+    const intEpisode = Math.floor(episode);
     
     const currentProg = media.mediaListEntry ? media.mediaListEntry.progress : 0;
     const animeName = media.title.english || media.title.romaji;
     let isCompleted = false; 
+    let xpData = null; // ✅ FIX: Declared at top level of try-block
 
     const storage = await chrome.storage.local.get(['anilistUserId', 'malToken']);
     let updatedPlatforms = [];
@@ -396,7 +397,6 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
         await apiRequest(mutation, variables, token);
         updatedPlatforms.push("AniList");
         
-        // ✅ SURGICAL FIX 1: Mutate the cache locally for instant sync, bypassing AniList's delayed servers
         chrome.storage.local.get(['full_watchlist_cache'], (res) => {
             if (res.full_watchlist_cache && res.full_watchlist_cache.data) {
                 const entry = res.full_watchlist_cache.data.find(e => e.media.id === media.id);
@@ -433,7 +433,6 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
         }
       }
 
-      let xpData = null;
       if (storage.anilistUserId) {
         xpData = await syncUserStatsToSupabase(storage.anilistUserId, trueWatchSeconds);
       }
@@ -463,7 +462,6 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
     if (isCompleted) {
       chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, malId: media.idMal, isMalOnly: media.isMalOnly, animeName: animeName, mediaType: 'ANIME' }, { frameId: frameId }).catch(() => {});
     } else if (updatedPlatforms.length > 0) {
-      // ✅ Inject the XP payload into the Success Toast
       chrome.tabs.sendMessage(tabId, { action: "SHOW_SUCCESS_TOAST", message: toastMessage, xpData: xpData }, { frameId: frameId }).catch(() => {}); 
     }
 
@@ -548,11 +546,12 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
     }
 
     const { media, token, platform } = result;
-    const intChapter = Math.floor(result.chapter); // FIX: Guarantee integer to prevent API 400 crashes!
+    const intChapter = Math.floor(result.chapter);
     
     const currentProg = media.mediaListEntry ? media.mediaListEntry.progress : 0;
     const mangaName = media.title.english || media.title.romaji;
     let isCompleted = false; 
+    let xpData = null; // ✅ FIX: Declared at top level of try-block
 
     const storage = await chrome.storage.local.get(['anilistUserId', 'malToken']);
     let updatedPlatforms = [];
@@ -583,7 +582,6 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
           await apiRequest(mutation, variables, token);
           updatedPlatforms.push("AniList");
           
-          // ✅ SURGICAL FIX 2: Mutate the cache locally for instant sync, bypassing AniList's delayed servers
           chrome.storage.local.get(['full_watchlist_cache'], (res) => {
               if (res.full_watchlist_cache && res.full_watchlist_cache.data) {
                   const entry = res.full_watchlist_cache.data.find(e => e.media.id === media.id);
@@ -620,7 +618,7 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
       }
 
       if (storage.anilistUserId) {
-        syncUserStatsToSupabase(storage.anilistUserId, trueReadSeconds);
+        xpData = await syncUserStatsToSupabase(storage.anilistUserId, trueReadSeconds);
       }
       
     } else if (media.chapters && currentProg >= media.chapters && media.status === 'FINISHED') {
@@ -648,12 +646,10 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
     }
 
     if (isCompleted) {
-      chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, malId: media.idMal, isMalOnly: media.isMalOnly, animeName: animeName, mediaType: 'ANIME' });
+      chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, malId: media.idMal, isMalOnly: media.isMalOnly, animeName: mangaName, mediaType: 'MANGA' });
     } else {
-      chrome.tabs.sendMessage(tabId, { action: "SHOW_SUCCESS_TOAST", message: toastMessage }); 
+      chrome.tabs.sendMessage(tabId, { action: "SHOW_SUCCESS_TOAST", message: toastMessage, xpData: xpData }); 
     }
-
-    
 
   } catch (error) {
     console.error("Manga Auto-Update Process Failed:", error);

@@ -281,7 +281,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
       const skipAmount = isOP ? learnedSkipData.op : learnedSkipData.ed;
       
-      // ✅ RECORD THE SKIP
+      // ✅ Record manual skip timestamps
       const oldTime = trackedVideo.currentTime;
       trackedVideo.currentTime += skipAmount;
       sessionSkips.push({
@@ -427,12 +427,12 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
           progress: (trackedVideo.currentTime / trackedVideo.duration) * 100,
           threshold: userThreshold,
           currentTime: trackedVideo.currentTime,
-          duration: trackedVideo.duration, // ✅ SEND DURATION
-          aniSkipData: aniSkipData,        // ✅ SEND API DATA
-          sessionSkips: sessionSkips,
+          duration: trackedVideo.duration,   // ✅ Pass video duration
+          aniSkipData: aniSkipData,           // ✅ Pass official API skip intervals
+          sessionSkips: sessionSkips,         // ✅ Pass manual session skip intervals
           isOtgLoaded: sendOtgStatus,
           resolvedData: resolvedOtgData,
-          hasTriggeredUpdate: hasTriggeredUpdate 
+          hasTriggeredUpdate: hasTriggeredUpdate
         }, (response) => {
           if (chrome.runtime.lastError) return;
           
@@ -699,7 +699,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         const isOP = ct < (trackedVideo.duration * 0.5);
         const skipAmount = (aniSkipData === "not_found" && learnedSkipData) ? (isOP ? learnedSkipData.op : learnedSkipData.ed) : 90;
         
-        // ✅ RECORD THE MANUAL SKIP
+        // ✅ Record manual skip timestamps
         const oldTime = trackedVideo.currentTime;
         trackedVideo.currentTime += skipAmount;
         sessionSkips.push({
