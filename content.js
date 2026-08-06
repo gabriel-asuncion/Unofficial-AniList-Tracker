@@ -667,7 +667,21 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         const parsedData = cleanMangaTitle(currentRawTitle);
         if (parsedData.title && parsedData.chapter !== null && parsedData.chapter !== lastTriggeredChapter) {
           lastTriggeredChapter = parsedData.chapter; 
-          try { chrome.runtime.sendMessage({ action: "AUTO_UPDATE_MANGA", cleanTitle: parsedData.title, chapter: parsedData.chapter, trueReadSeconds: mangaWatchSeconds }).catch(() => {}); } catch(e) {}
+          try { 
+            chrome.runtime.sendMessage({ 
+              action: "AUTO_UPDATE_MANGA", 
+              cleanTitle: parsedData.title, 
+              chapter: parsedData.chapter, 
+              // ✅ Pass the detailed reading metrics to the backend
+              readingData: {
+                readingType: readingType,
+                totalPages: totalProg,
+                scrollHeight: document.documentElement.scrollHeight,
+                viewportHeight: document.documentElement.clientHeight,
+                trueReadSeconds: mangaWatchSeconds
+              }
+            }).catch(() => {}); 
+          } catch(e) {}
         }
       }
     }
@@ -1300,37 +1314,84 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     const media = entry.media;
     const currentProgress = entry.progress || 0;
     
-    // Properly verify if media is Manga to prevent "CH" label on Anime
-    const isManga = media.format === 'MANGA' || media.format === 'NOVEL' || media.format === 'ONE_SHOT';
+    // 1. Detect if the media is Manga or Anime
+    const isManga = (media && (media.format === 'MANGA' || media.format === 'NOVEL' || media.format === 'ONE_SHOT')) || 
+                    (typeof getActiveMediaType === 'function' && getActiveMediaType() === 'MANGA');
+    
     const unitLabel = isManga ? 'Ch' : 'Ep';
 
-    let latestCount = media.episodes || media.chapters || '?';
-    if (media.nextAiringEpisode) latestCount = media.nextAiringEpisode.episode - 1;
+    let latestCount = media ? (media.episodes || media.chapters || '?') : '?';
+    if (media && media.nextAiringEpisode) {
+      latestCount = media.nextAiringEpisode.episode - 1;
+    }
     
+    // 2. Evaluate status
     let isUpToDate = false;
     let badgeType = 'UNLISTED';
 
     if (isWatchlisted) {
-      if (extractedEp !== null && isEpisodeCard) isUpToDate = currentProgress >= extractedEp;
-      else isUpToDate = latestCount !== '?' && currentProgress >= latestCount;
+      if (extractedEp !== null && isEpisodeCard) {
+        // Direct comparison against the chapter or episode extracted from the card
+        isUpToDate = currentProgress >= extractedEp;
+      } else {
+        // Fallback comparison against total count if available
+        isUpToDate = (latestCount !== '?') && (currentProgress >= latestCount);
+      }
+      
       badgeType = isUpToDate ? 'YES' : 'NO';
     }
 
+    // 3. Assign SVG and theme color based on status
     let activeSvg, themeColor;
-    if (badgeType === 'UNLISTED') { activeSvg = SVG_UNLISTED; themeColor = '#FFD345'; } 
-    else if (badgeType === 'YES') { activeSvg = SVG_YES; themeColor = '#4cca51'; } 
-    else { activeSvg = SVG_NO; themeColor = '#e74c3c'; }
+    if (badgeType === 'UNLISTED') { 
+      activeSvg = SVG_UNLISTED; 
+      themeColor = '#FFD345'; 
+    } else if (badgeType === 'YES') { 
+      activeSvg = SVG_YES; 
+      themeColor = '#4cca51'; // Green for Read/Watched
+    } else { 
+      activeSvg = SVG_NO; 
+      themeColor = '#e74c3c'; // Red for Unread/Unwatched
+    }
 
+    // 4. Create and inject the inline badge element
     const badgeWrapper = document.createElement('span');
     badgeWrapper.className = 'shiinah-inline-badge';
-    Object.assign(badgeWrapper.style, { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', position: 'absolute', top: '8px', right: '8px', cursor: 'pointer', zIndex: '2147483640', flexShrink: '0' });
+    Object.assign(badgeWrapper.style, { 
+      display: 'inline-flex', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      position: 'absolute', 
+      top: '8px', 
+      right: '8px', 
+      cursor: 'pointer', 
+      zIndex: '2147483640', 
+      flexShrink: '0' 
+    });
     badgeWrapper.innerHTML = `<img src="${activeSvg}" style="width: 22px; height: 22px; pointer-events: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));">`;
     targetEl.appendChild(badgeWrapper);
 
+    // 5. Create tooltip container
     const tooltip = document.createElement('div');
     tooltip.className = 'shiinah-tooltip-container'; 
     tooltip._linkedBadge = badgeWrapper; 
-    Object.assign(tooltip.style, { position: 'fixed', width: '290px', padding: '16px', backgroundColor: '#0b1119', border: `1px solid ${themeColor}`, borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.9)', display: 'none', flexDirection: 'column', gap: '12px', zIndex: '2147483647', pointerEvents: 'auto', fontFamily: 'system-ui, sans-serif', color: '#fff', cursor: 'default' });
+    Object.assign(tooltip.style, { 
+      position: 'fixed', 
+      width: '290px', 
+      padding: '16px', 
+      backgroundColor: '#0b1119', 
+      border: `1px solid ${themeColor}`, 
+      borderRadius: '12px', 
+      boxShadow: '0 10px 30px rgba(0,0,0,0.9)', 
+      display: 'none', 
+      flexDirection: 'column', 
+      gap: '12px', 
+      zIndex: '2147483647', 
+      pointerEvents: 'auto', 
+      fontFamily: 'system-ui, sans-serif', 
+      color: '#fff', 
+      cursor: 'default' 
+    });
 
     const bridge = document.createElement('div');
     bridge.style.cssText = 'position: absolute; bottom: -15px; left: 0; width: 100%; height: 15px; background: transparent;';
@@ -1338,13 +1399,16 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
     badgeWrapper.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
 
+    // 6. Build Tooltip Header HTML
     let headerHtml = '';
     if (isWatchlisted) {
       if (extractedEp !== null && isEpisodeCard) {
+        const statusText = isUpToDate ? (isManga ? 'Read ✓' : 'Watched ✓') : (isManga ? 'Unread' : 'Unwatched');
+        
         headerHtml = `
           <div style="font-size: 11px; color: #9fadbd; font-weight: bold; text-align: center; letter-spacing: 0.5px; margin-bottom: 4px; text-transform: uppercase;">${unitLabel} ${extractedEp}</div>
           <div style="font-size: 20px; color: ${themeColor}; font-weight: 900; text-align: center; letter-spacing: 1px; margin-bottom: 4px;">
-            ${isUpToDate ? 'Watched ✓' : 'Unwatched'}
+            ${statusText}
           </div>
           <div style="font-size: 11px; color: #677b94; text-align: center; margin-bottom: 8px;">Your progress: ${unitLabel} ${currentProgress}</div>
           <div class="shiinah-media-status" style="font-size: 11px; color: #E5C07B; text-align: center; font-weight: bold; margin-bottom: 10px;"></div>
@@ -1369,7 +1433,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       `;
     }
 
-    // Inject the CSS for the spinner
     if (!document.getElementById('shiinah-spinner-style')) {
       const style = document.createElement('style');
       style.id = 'shiinah-spinner-style';
@@ -1391,7 +1454,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
     let cachedStats = null;
 
-    // ✅ SURGICAL FIX: Safely render the single AniList chart and eliminate the ReferenceError
     function renderCharts() {
       const statsBody = tooltip.querySelector('.shiinah-stats-body');
       if (!statsBody) return;
@@ -1446,26 +1508,19 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       if (left < 10) left = 10;
       if (left + tooltip.offsetWidth > window.innerWidth - 10) left = window.innerWidth - tooltip.offsetWidth - 10;
       if (top < 10) top = rect.bottom + 15; 
-      tooltip.style.top = `${top}px`; tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`; 
+      tooltip.style.left = `${left}px`;
 
       if (!cachedStats) {
         clearTimeout(fetchIntentTimeout);
         fetchIntentTimeout = setTimeout(async () => {
           try {
             if (!chrome.runtime?.id) return;
-            const urlStr = window.location.href.toLowerCase();
-            const textStr = rawText.toLowerCase();
-            const hrefStr = (targetEl.tagName === 'A' ? targetEl.getAttribute('href') : targetEl.querySelector('a')?.getAttribute('href')) || '';
-            const isMangaCard = urlStr.includes('manga') || urlStr.includes('read') || targetEl.closest('.manga-card') || hrefStr.includes('/manga/') || hrefStr.includes('/chapter/') || /\b(chapter|ch\.|vol|manga|webtoon|manhwa)\b/i.test(textStr);
-            const isAnimeCard = urlStr.includes('anime') || urlStr.includes('watch') || targetEl.closest('.anime-card') || hrefStr.includes('/anime/') || hrefStr.includes('/episode/') || hrefStr.includes('/series/') || /\b(season|ep|episode|ova|movie)\b/i.test(textStr);
+            const pageMediaType = typeof getActiveMediaType === 'function' ? getActiveMediaType() : (isManga ? 'MANGA' : 'ANIME');
             
             if (isWatchlisted) {
-              const mediaType = (entry.media && entry.media.format === 'MANGA') ? 'MANGA' : (isMangaCard ? 'MANGA' : 'ANIME');
-              console.log("[Shiinah UI] Requesting stats for ID:", media.id);
-              
-              chrome.runtime.sendMessage({ action: "FETCH_MEDIA_STATS", mediaId: media.id, malId: media.idMal, mediaType: mediaType }, (res) => {
+              chrome.runtime.sendMessage({ action: "FETCH_MEDIA_STATS", mediaId: media.id, malId: media.idMal, mediaType: pageMediaType }, (res) => {
                 if (chrome.runtime.lastError) console.error("[Shiinah UI] Message Error:", chrome.runtime.lastError.message);
-                console.log("[Shiinah UI] Stats received:", res);
                 
                 cachedStats = res?.stats || { al: null, meta: null };
                 renderCharts();
@@ -1474,23 +1529,29 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
               const linkContainer = tooltip.querySelector('.shiinah-view-links');
               if (linkContainer && !linkContainer.hasChildNodes()) {
                 if (media.id > 0 && !media.isMalOnly) {
-                  const alLink = document.createElement('a'); alLink.textContent = 'View in AL'; alLink.href = `https://anilist.co/${mediaType.toLowerCase()}/${media.id}`; alLink.target = '_blank';
+                  const alLink = document.createElement('a'); 
+                  alLink.textContent = 'View in AL'; 
+                  alLink.href = `https://anilist.co/${pageMediaType.toLowerCase()}/${media.id}`; 
+                  alLink.target = '_blank';
                   Object.assign(alLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#3db4f2', border: '1px solid #3db4f2', padding: '6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
-                  alLink.onmouseenter = () => { alLink.style.background = '#3db4f2'; alLink.style.color = '#fff'; }; alLink.onmouseleave = () => { alLink.style.background = 'transparent'; alLink.style.color = '#3db4f2'; };
+                  alLink.onmouseenter = () => { alLink.style.background = '#3db4f2'; alLink.style.color = '#fff'; }; 
+                  alLink.onmouseleave = () => { alLink.style.background = 'transparent'; alLink.style.color = '#3db4f2'; };
                   alLink.onclick = (e) => e.stopPropagation();
                   linkContainer.appendChild(alLink);
                 }
                 if (media.idMal || media.isMalOnly) {
-                  const malLink = document.createElement('a'); malLink.textContent = 'View in MAL';
-                  malLink.href = `https://myanimelist.net/${mediaType.toLowerCase()}/${media.isMalOnly ? media.idMal : media.idMal}`; malLink.target = '_blank';
+                  const malLink = document.createElement('a'); 
+                  malLink.textContent = 'View in MAL';
+                  malLink.href = `https://myanimelist.net/${pageMediaType.toLowerCase()}/${media.isMalOnly ? media.idMal : media.idMal}`; 
+                  malLink.target = '_blank';
                   Object.assign(malLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#5C7CE5', border: '1px solid #2E51A2', padding: '6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
-                  malLink.onmouseenter = () => { malLink.style.background = '#2E51A2'; malLink.style.color = '#fff'; }; malLink.onmouseleave = () => { malLink.style.background = 'transparent'; malLink.style.color = '#5C7CE5'; };
+                  malLink.onmouseenter = () => { malLink.style.background = '#2E51A2'; malLink.style.color = '#fff'; }; 
+                  malLink.onmouseleave = () => { malLink.style.background = 'transparent'; malLink.style.color = '#5C7CE5'; };
                   malLink.onclick = (e) => e.stopPropagation();
                   linkContainer.appendChild(malLink);
                 }
               }
             } else {
-              console.log("[Shiinah UI] Searching stats for title:", rawText);
               const fetchMedia = (type) => new Promise(resolve => {
                   chrome.runtime.sendMessage({ action: "SEARCH_AND_FETCH_STATS", title: rawText, mediaType: type }, (res) => {
                       if (chrome.runtime.lastError) console.error("[Shiinah UI] Message Error:", chrome.runtime.lastError.message);
@@ -1498,65 +1559,73 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
                   });
               });
               
-              let animeRes = null; let mangaRes = null;
-              if (isAnimeCard && !isMangaCard) animeRes = await fetchMedia('ANIME');
-              else if (isMangaCard && !isAnimeCard) mangaRes = await fetchMedia('MANGA');
-              else [animeRes, mangaRes] = await Promise.all([fetchMedia('ANIME'), fetchMedia('MANGA')]);
-
-              const primaryRes = isMangaCard ? (mangaRes?.media ? mangaRes : animeRes) : (animeRes?.media ? animeRes : mangaRes);
-              console.log("[Shiinah UI] Search resolved:", primaryRes);
+              const primaryRes = await fetchMedia(pageMediaType);
               
               cachedStats = primaryRes?.stats || { al: null, meta: null };
               renderCharts();
 
               const btnContainer = tooltip.querySelector('.shiinah-add-btn-container');
-              if (btnContainer && (animeRes?.media?.id || mangaRes?.media?.id)) {
-                btnContainer.innerHTML = ''; btnContainer.style.display = 'flex';
-                const createBtnGroup = (mediaData, type) => {
-                  if (!mediaData || !mediaData.id) return null;
-                  const group = document.createElement('div');
-                  Object.assign(group.style, { display: 'flex', flexDirection: 'column', gap: '4px', flex: '1', minWidth: '0' });
-                  const platforms = [];
-                  if (mediaData.id > 0 && !mediaData.isMalOnly) platforms.push('AL');
-                  if (mediaData.idMal || mediaData.isMalOnly) platforms.push('MAL');
-                  const platStr = platforms.length > 0 ? ` [${platforms.join('/')}]` : '';
+              if (btnContainer && primaryRes?.media?.id) {
+                btnContainer.innerHTML = ''; 
+                btnContainer.style.display = 'flex';
+                
+                const group = document.createElement('div');
+                Object.assign(group.style, { display: 'flex', flexDirection: 'column', gap: '4px', flex: '1', minWidth: '0' });
+                const platforms = [];
+                if (primaryRes.media.id > 0 && !primaryRes.media.isMalOnly) platforms.push('AL');
+                if (primaryRes.media.idMal || primaryRes.media.isMalOnly) platforms.push('MAL');
+                const platStr = platforms.length > 0 ? ` [${platforms.join('/')}]` : '';
 
-                  const btn = document.createElement('button'); btn.textContent = `+ ${type === 'MANGA' ? 'Manga' : 'Anime'}${platStr}`;
-                  Object.assign(btn.style, { width: '100%', background: '#3db4f2', color: '#fff', border: 'none', padding: '8px 4px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px', transition: '0.2s', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
-                  btn.addEventListener('mouseenter', () => btn.style.background = '#2c9ad1'); btn.addEventListener('mouseleave', () => btn.style.background = '#3db4f2');
-                  btn.addEventListener('click', (e) => {
-                    e.preventDefault(); e.stopPropagation(); btn.textContent = 'Adding...';
-                    chrome.runtime.sendMessage({ action: "ADD_TO_WATCHLIST", mediaId: mediaData.id, malId: mediaData.idMal, mediaType: type }, (addRes) => {
-                      if (addRes?.success) { btn.textContent = 'Added! ✓'; btn.style.background = '#4cca51'; } else { btn.textContent = 'Error'; btn.style.background = '#e74c3c'; }
-                    });
+                const btn = document.createElement('button'); 
+                btn.textContent = `+ ${pageMediaType === 'MANGA' ? 'Manga' : 'Anime'}${platStr}`;
+                Object.assign(btn.style, { width: '100%', background: '#3db4f2', color: '#fff', border: 'none', padding: '8px 4px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px', transition: '0.2s', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
+                btn.addEventListener('mouseenter', () => btn.style.background = '#2c9ad1'); 
+                btn.addEventListener('mouseleave', () => btn.style.background = '#3db4f2');
+                btn.addEventListener('click', (e) => {
+                  e.preventDefault(); 
+                  e.stopPropagation(); 
+                  btn.textContent = 'Adding...';
+                  chrome.runtime.sendMessage({ action: "ADD_TO_WATCHLIST", mediaId: primaryRes.media.id, malId: primaryRes.media.idMal, mediaType: pageMediaType }, (addRes) => {
+                    if (addRes?.success) { 
+                      btn.textContent = 'Added! ✓'; 
+                      btn.style.background = '#4cca51'; 
+                    } else { 
+                      btn.textContent = 'Error'; 
+                      btn.style.background = '#e74c3c'; 
+                    }
                   });
-                  group.appendChild(btn);
+                });
+                group.appendChild(btn);
 
-                  const linksRow = document.createElement('div');
-                  Object.assign(linksRow.style, { display: 'flex', gap: '4px', width: '100%' });
+                const linksRow = document.createElement('div');
+                Object.assign(linksRow.style, { display: 'flex', gap: '4px', width: '100%' });
 
-                  if (mediaData.id > 0 && !mediaData.isMalOnly) {
-                    const alLink = document.createElement('a'); alLink.textContent = 'View in AL'; alLink.href = `https://anilist.co/${type.toLowerCase()}/${mediaData.id}`; alLink.target = '_blank';
-                    Object.assign(alLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#3db4f2', border: '1px solid #3db4f2', padding: '4px 0', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
-                    alLink.onmouseenter = () => { alLink.style.background = '#3db4f2'; alLink.style.color = '#fff'; }; alLink.onmouseleave = () => { alLink.style.background = 'transparent'; alLink.style.color = '#3db4f2'; }; alLink.onclick = (e) => e.stopPropagation();
-                    linksRow.appendChild(alLink);
-                  }
+                if (primaryRes.media.id > 0 && !primaryRes.media.isMalOnly) {
+                  const alLink = document.createElement('a'); 
+                  alLink.textContent = 'View in AL'; 
+                  alLink.href = `https://anilist.co/${pageMediaType.toLowerCase()}/${primaryRes.media.id}`; 
+                  alLink.target = '_blank';
+                  Object.assign(alLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#3db4f2', border: '1px solid #3db4f2', padding: '4px 0', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
+                  alLink.onmouseenter = () => { alLink.style.background = '#3db4f2'; alLink.style.color = '#fff'; }; 
+                  alLink.onmouseleave = () => { alLink.style.background = 'transparent'; alLink.style.color = '#3db4f2'; }; 
+                  alLink.onclick = (e) => e.stopPropagation();
+                  linksRow.appendChild(alLink);
+                }
 
-                  if (mediaData.idMal || mediaData.isMalOnly) {
-                    const malLink = document.createElement('a'); malLink.textContent = 'View in MAL';
-                    malLink.href = `https://myanimelist.net/${type.toLowerCase()}/${mediaData.isMalOnly ? mediaData.idMal : mediaData.idMal}`; malLink.target = '_blank';
-                    Object.assign(malLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#5C7CE5', border: '1px solid #2E51A2', padding: '4px 0', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
-                    malLink.onmouseenter = () => { malLink.style.background = '#2E51A2'; malLink.style.color = '#fff'; }; malLink.onmouseleave = () => { malLink.style.background = 'transparent'; malLink.style.color = '#5C7CE5'; }; malLink.onclick = (e) => e.stopPropagation();
-                    linksRow.appendChild(malLink);
-                  }
+                if (primaryRes.media.idMal || primaryRes.media.isMalOnly) {
+                  const malLink = document.createElement('a'); 
+                  malLink.textContent = 'View in MAL';
+                  malLink.href = `https://myanimelist.net/${pageMediaType.toLowerCase()}/${primaryRes.media.isMalOnly ? primaryRes.media.idMal : primaryRes.media.idMal}`; 
+                  malLink.target = '_blank';
+                  Object.assign(malLink.style, { flex: '1', textAlign: 'center', background: 'transparent', color: '#5C7CE5', border: '1px solid #2E51A2', padding: '4px 0', borderRadius: '4px', fontSize: '9px', fontWeight: 'bold', textDecoration: 'none', transition: '0.2s' });
+                  malLink.onmouseenter = () => { malLink.style.background = '#2E51A2'; malLink.style.color = '#fff'; }; 
+                  malLink.onmouseleave = () => { malLink.style.background = 'transparent'; malLink.style.color = '#5C7CE5'; }; 
+                  malLink.onclick = (e) => e.stopPropagation();
+                  linksRow.appendChild(malLink);
+                }
 
-                  group.appendChild(linksRow); return group;
-                };
-
-                const animeGroup = createBtnGroup(animeRes?.media, 'ANIME');
-                const mangaGroup = createBtnGroup(mangaRes?.media, 'MANGA');
-                if (animeGroup) btnContainer.appendChild(animeGroup);
-                if (mangaGroup) btnContainer.appendChild(mangaGroup);
+                group.appendChild(linksRow);
+                btnContainer.appendChild(group);
               }
             }
           } catch(e) { console.error("[Shiinah UI] Fetch Intent Error:", e); }
@@ -1564,7 +1633,11 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       }
     };
 
-    const scheduleHide = () => { clearTimeout(fetchIntentTimeout); hideTimeout = setTimeout(() => { tooltip.style.display = 'none'; }, 250); };
+    const scheduleHide = () => { 
+      clearTimeout(fetchIntentTimeout); 
+      hideTimeout = setTimeout(() => { tooltip.style.display = 'none'; }, 250); 
+    };
+
     badgeWrapper.addEventListener('mouseenter', showTooltip);
     badgeWrapper.addEventListener('mouseleave', scheduleHide);
     tooltip.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
@@ -1593,8 +1666,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     };
 
     const fetchAndBuild = (forceRedraw = false) => {
-      // 1. Ask background for the reliable list (it fetches from API if cache was wiped by an update)
-      chrome.runtime.sendMessage({ action: "GET_USER_WATCHLIST" }, (response) => {
+      const pageMediaType = getActiveMediaType(); // ✅ STRICT TAB FILTERING
+
+      chrome.runtime.sendMessage({ action: "GET_USER_WATCHLIST", mediaType: pageMediaType }, (response) => {
         if (chrome.runtime.lastError) return;
 
         let merged = new Map();
@@ -1603,9 +1677,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
           response.watchlist.forEach(entry => merged.set(entry.media.id, entry));
         }
         
-        // 2. Overlay the instant popup cache for immediate visual feedback
-        chrome.storage.local.get(['cachedList_data'], (res) => {
-          if (res.cachedList_data) {
+        chrome.storage.local.get(['cachedList_data', 'currentMode'], (res) => {
+          // Ensure popup cache matches the tab's media type before overlaying
+          if (res.cachedList_data && res.currentMode === pageMediaType) {
             res.cachedList_data.forEach(entry => merged.set(entry.media.id, entry));
           }
           
@@ -1614,6 +1688,22 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         });
       });
     };
+
+    fetchAndBuild(true);
+    
+    chrome.storage.onChanged.addListener((changes) => {
+      if (changes.trigger_dom_refresh || changes.cachedList_data || changes.full_watchlist_cache_ANIME || changes.full_watchlist_cache_MANGA) {
+        document.querySelectorAll('.shiinah-wrapper-marked').forEach(card => {
+            card.removeAttribute('data-shiinah-scanned');
+            card.classList.remove('shiinah-wrapper-marked');
+            const badge = card.querySelector('.shiinah-inline-badge');
+            if (badge) badge.remove();
+        });
+        
+        document.querySelectorAll('.shiinah-tooltip-container').forEach(el => el.remove());
+        fetchAndBuild(true);
+      }
+    });
 
     // Initial load
     fetchAndBuild(true);

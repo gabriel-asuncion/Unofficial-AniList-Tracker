@@ -247,7 +247,8 @@ function hashStringToNegativeInt(str) {
 
 async function getOtgTimeFromSupabase(userId, mediaId, episode) {
   try {
-    const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&media_id=eq.${mediaId}&episode=eq.${episode}&select=playback_time,source_url`;
+    const safeEp = Math.floor(episode); // ✅ FIX: Prevent Postgres Float Crash
+    const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&media_id=eq.${mediaId}&episode=eq.${safeEp}&select=playback_time,source_url`;
     const res = await fetch(url, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
     const data = await res.json();
     
@@ -260,6 +261,7 @@ async function getOtgTimeFromSupabase(userId, mediaId, episode) {
 
 async function saveOtgTimeToSupabase(userId, mediaId, episode, time, sourceUrl, customTitle = null, platform = 'ANILIST') {
   try {
+    const safeEp = Math.floor(episode); // ✅ FIX: Prevent Postgres Float Crash
     const url = `${SUPABASE_URL}/rest/v1/otg_saves?on_conflict=anilist_user_id,media_id,episode`;
     const res = await fetch(url, {
       method: 'POST',
@@ -272,15 +274,14 @@ async function saveOtgTimeToSupabase(userId, mediaId, episode, time, sourceUrl, 
       body: JSON.stringify({ 
         anilist_user_id: userId, 
         media_id: mediaId, 
-        episode: episode, 
-        playback_time: Math.round(time), // ✅ Safety: Convert to integer
+        episode: safeEp, // ✅ Safe Integer payload
+        playback_time: Math.round(time), 
         source_url: sourceUrl,
         custom_title: customTitle,
         platform: platform
       })
     });
     
-    // ✅ Add error logging so we can see if Supabase rejects it
     if (!res.ok) {
       const errorText = await res.text();
       console.error("[OTG Save Error] Supabase rejected the update:", res.status, errorText);
@@ -292,16 +293,28 @@ async function saveOtgTimeToSupabase(userId, mediaId, episode, time, sourceUrl, 
 
 async function deleteOtgTimeFromSupabase(userId, mediaId, episode) {
   try {
-    const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&media_id=eq.${mediaId}&episode=eq.${episode}`;
+    const safeEp = Math.floor(episode);
+    const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&media_id=eq.${mediaId}&episode=eq.${safeEp}`;
     await fetch(url, { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
   } catch (error) {}
 }
 
 async function deleteOldEpisodesFromSupabase(userId, mediaId, currentEpisode) {
   try {
-    const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&media_id=eq.${mediaId}&episode=lt.${currentEpisode}`;
+    const safeEp = Math.floor(currentEpisode);
+    const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&media_id=eq.${mediaId}&episode=lt.${safeEp}`;
     await fetch(url, { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
   } catch (error) {}
+}
+
+// --- SMART TITLE SANITIZER ---
+function getSearchPermutations(title) {
+  const base = title.replace(/[’‘`]/g, "'").replace(/\s+/g, ' ').trim();
+  const noBrackets = base.replace(/\[.*?\]|\(.*?\)/g, '').trim();
+  const noPunc = noBrackets.replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim();
+  const shortTerm = noPunc.split(' ').slice(0, 4).join(' '); // First 4 words fallback
+  const splitDash = base.split(/[:\-]/)[0].trim();
+  return [...new Set([base, noBrackets, noPunc, splitDash, shortTerm])].filter(t => t.length > 2);
 }
 
 async function findAniListMedia(tabTitle) {
@@ -313,8 +326,9 @@ async function findAniListMedia(tabTitle) {
   const match = tabTitle.match(regex);
   if (!match || !match[1] || !match[2]) return null;
 
-  let parsedTitle = match[1].replace(/[-|—–:~]+$/g, '').replace(/\s+\(?(?:Sub|Dub)\)?$/i, '').trim();
+  const parsedTitle = match[1].replace(/[-|—–:~]+$/g, '').replace(/\s+\(?(?:Sub|Dub)\)?$/i, '').trim();
   const episode = parseInt(match[2], 10);
+  const perms = getSearchPermutations(parsedTitle);
 
   const query = `
     query ($search: String) {
@@ -325,26 +339,28 @@ async function findAniListMedia(tabTitle) {
     }
   `;
 
-  async function doSearch(term) {
+  // 1. Try AniList 
+  for (const term of perms) {
     const res = await apiRequest(query, { search: term }, token);
-    return res.data?.Media || null;
+    if (res.data?.Media) return { media: res.data.Media, episode, token };
   }
 
-  let media = await doSearch(parsedTitle);
-  if (!media) {
-    let noBrackets = parsedTitle.replace(/\[.*?\]|\(.*?\)[^\w\s]*/g, '').trim();
-    media = await doSearch(noBrackets);
-    if (!media) {
-      let noPunctuation = noBrackets.replace(/[?!,]/g, '').replace(/\s+/g, ' ').trim();
-      media = await doSearch(noPunctuation);
-      if (!media) {
-         let splitTitle = parsedTitle.split(/[:\-]/)[0].trim();
-         media = await doSearch(splitTitle);
+  // 2. Try Tenrai Bridge
+  for (const term of perms) {
+    try {
+      const tRes = await fetch(`https://api.tenrai.org/v1/anime?q=${encodeURIComponent(term)}&limit=1`);
+      if (tRes.ok) {
+        const tData = await tRes.json();
+        if (tData?.data && tData.data.length > 0) {
+          const malId = tData.data[0].mal_id;
+          const crossRefQuery = `query($idMal: Int) { Media(idMal: $idMal, type: ANIME) { id idMal title { romaji english } coverImage { large } episodes mediaListEntry { id progress status } } }`;
+          const crossRefRes = await apiRequest(crossRefQuery, { idMal: malId }, token);
+          if (crossRefRes.data?.Media) return { media: crossRefRes.data.Media, episode, token };
+        }
       }
-    }
+    } catch (e) {}
   }
-
-  return { media, episode, token };
+  return null;
 }
 
 // ==========================================
@@ -352,6 +368,8 @@ async function findAniListMedia(tabTitle) {
 // ==========================================
 
 async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0) {
+  let xpData = null; 
+  
   try {
     const result = await findAniListMedia(tabTitle);
     
@@ -363,11 +381,9 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
 
     const { media, episode, token } = result;
     const intEpisode = Math.floor(episode);
-    
     const currentProg = media.mediaListEntry ? media.mediaListEntry.progress : 0;
     const animeName = media.title.english || media.title.romaji;
     let isCompleted = false; 
-    let xpData = null; // ✅ FIX: Declared at top level of try-block
 
     const storage = await chrome.storage.local.get(['anilistUserId', 'malToken']);
     let updatedPlatforms = [];
@@ -385,11 +401,7 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
       }
 
       try {
-        const mutation = `
-          mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
-            SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id }
-          }
-        `;
+        const mutation = `mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) { SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id } }`;
         const variables = { mediaId: media.id, progress: intEpisode, status: newStatus };
         if (startedAt) variables.startedAt = startedAt;
         if (completedAt) variables.completedAt = completedAt;
@@ -400,20 +412,14 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
         chrome.storage.local.get(['full_watchlist_cache'], (res) => {
             if (res.full_watchlist_cache && res.full_watchlist_cache.data) {
                 const entry = res.full_watchlist_cache.data.find(e => e.media.id === media.id);
-                if (entry) {
-                    entry.progress = intEpisode;
-                    entry.status = newStatus;
-                } else {
-                    res.full_watchlist_cache.data.push({ progress: intEpisode, status: newStatus, media: media });
-                }
+                if (entry) { entry.progress = intEpisode; entry.status = newStatus; } 
+                else { res.full_watchlist_cache.data.push({ progress: intEpisode, status: newStatus, media: media }); }
                 chrome.storage.local.set({ full_watchlist_cache: res.full_watchlist_cache });
             }
             setTimeout(() => chrome.storage.local.set({ trigger_dom_refresh: Date.now() }), 500);
         });
         processOfflineQueue();
-      } catch (networkError) {
-        queueFailedUpdate(media.id, intEpisode, newStatus, token);
-      }
+      } catch (networkError) { queueFailedUpdate(media.id, intEpisode, newStatus, token); }
 
       let malIdToUse = media.idMal;
       if (!malIdToUse && storage.malToken) {
@@ -428,36 +434,24 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
         try {
           await updateMalProgress(malIdToUse, intEpisode, newStatus, 'ANIME', storage.malToken);
           updatedPlatforms.push("MAL");
-        } catch (e) {
-          console.error("MAL Dual-Sync Failed:", e);
-        }
+        } catch (e) { console.error("MAL Dual-Sync Failed:", e); }
       }
 
-      if (storage.anilistUserId) {
-        xpData = await syncUserStatsToSupabase(storage.anilistUserId, trueWatchSeconds);
-      }
+      if (storage.anilistUserId) xpData = await syncUserStatsToSupabase(storage.anilistUserId, trueWatchSeconds);
       
     } else if (media.episodes && currentProg >= media.episodes) {
       isCompleted = true;
     }
 
-    if (activeSessions[tabId]) {
-      delete activeSessions[tabId];
-    }
-
-    if (storage.anilistUserId) {
-      await deleteOtgTimeFromSupabase(storage.anilistUserId, media.id, intEpisode);
-    }
+    if (activeSessions[tabId]) delete activeSessions[tabId];
+    if (storage.anilistUserId) await deleteOtgTimeFromSupabase(storage.anilistUserId, media.id, intEpisode);
 
     chrome.action.setBadgeBackgroundColor({ color: '#4cca51' }); 
     chrome.action.setBadgeText({ text: '✓' });
     
     let platformText = updatedPlatforms.length > 1 ? "both AniList & MAL" : (updatedPlatforms[0] || "API");
     let toastMessage = `${animeName} updated to Episode ${intEpisode} on ${platformText}!`;
-    
-    if (updatedPlatforms.length === 0 && currentProg >= intEpisode) {
-        toastMessage = `${animeName} is already at Episode ${intEpisode}!`;
-    }
+    if (updatedPlatforms.length === 0 && currentProg >= intEpisode) toastMessage = `${animeName} is already at Episode ${intEpisode}!`;
 
     if (isCompleted) {
       chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, malId: media.idMal, isMalOnly: media.isMalOnly, animeName: animeName, mediaType: 'ANIME' }, { frameId: frameId }).catch(() => {});
@@ -475,67 +469,68 @@ async function processAutoUpdate(tabTitle, tabId, trueWatchSeconds, frameId = 0)
 // --- UNIFIED MANGA SEARCHER ---
 async function findUnifiedManga(cleanTitle, chapter) {
   const storage = await chrome.storage.local.get(['anilistToken', 'malToken']);
+  const perms = getSearchPermutations(cleanTitle);
+  let resolvedMalId = null;
   
-  // 1. Try AniList First
   if (storage.anilistToken) {
-    const aniQuery = `
-      query ($search: String) {
-        Media (search: $search, type: MANGA, sort: SEARCH_MATCH) {
-          id idMal status title { romaji english } coverImage { large } chapters
-          mediaListEntry { id progress status }
-        }
-      }
-    `;
-    try {
-      const aniRes = await apiRequest(aniQuery, { search: cleanTitle }, storage.anilistToken);
-      if (aniRes.data?.Media) {
-        let foundMedia = aniRes.data.Media;
-        
-        // Robust MAL Fallback if AniList lacks idMal mapping
-        if (!foundMedia.idMal && storage.malToken) {
-          try {
-            const officialTitle = foundMedia.title.english || foundMedia.title.romaji;
-            let malSearch = await malApiRequest(`manga?q=${encodeURIComponent(officialTitle)}&limit=1`, 'GET', null, storage.malToken);
-            
-            // Try Romaji if English fails
-            if ((!malSearch.data || malSearch.data.length === 0) && foundMedia.title.romaji) {
-               malSearch = await malApiRequest(`manga?q=${encodeURIComponent(foundMedia.title.romaji)}&limit=1`, 'GET', null, storage.malToken);
-            }
-            
-            // Try truncated Romaji (First 3 words) if both fail
-            if ((!malSearch.data || malSearch.data.length === 0) && foundMedia.title.romaji) {
-               const shortRomaji = foundMedia.title.romaji.split(' ').slice(0, 3).join(' ');
-               malSearch = await malApiRequest(`manga?q=${encodeURIComponent(shortRomaji)}&limit=1`, 'GET', null, storage.malToken);
-            }
+    const aniQuery = `query ($search: String) { Media (search: $search, type: MANGA, sort: SEARCH_MATCH) { id idMal status title { romaji english } coverImage { large } chapters mediaListEntry { id progress status } } }`;
+    
+    // 1. Try AniList
+    for (const term of perms) {
+      try {
+        const aniRes = await apiRequest(aniQuery, { search: term }, storage.anilistToken);
+        if (aniRes.data?.Media) return { media: aniRes.data.Media, chapter, token: storage.anilistToken, platform: 'ANILIST' };
+      } catch (e) {}
+    }
 
-            if (malSearch.data?.length > 0) {
-              foundMedia.idMal = malSearch.data[0].node.id;
-            }
-          } catch(e) {}
+    // 2. Try Tenrai Bridge
+    for (const term of perms) {
+      try {
+        const tenraiRes = await fetch(`https://api.tenrai.org/v1/manga?q=${encodeURIComponent(term)}&limit=1`);
+        if (tenraiRes.ok) {
+          const tenraiData = await tenraiRes.json();
+          if (tenraiData?.data && tenraiData.data.length > 0) {
+            resolvedMalId = tenraiData.data[0].mal_id;
+            const crossRefQuery = `query($idMal: Int) { Media(idMal: $idMal, type: MANGA) { id idMal status title { romaji english } coverImage { large } chapters mediaListEntry { id progress status } } }`;
+            const crossRefRes = await apiRequest(crossRefQuery, { idMal: resolvedMalId }, storage.anilistToken);
+            if (crossRefRes.data?.Media) return { media: crossRefRes.data.Media, chapter, token: storage.anilistToken, platform: 'ANILIST' };
+            break;
+          }
         }
-
-        return { media: foundMedia, chapter, token: storage.anilistToken, platform: 'ANILIST' };
-      }
-    } catch (e) { console.log("AniList search failed, falling back to MAL..."); }
+      } catch (e) {}
+    }
   }
 
-  // 2. Try MAL directly if AniList returned null
+  // 3. Fallback to Strict MAL using the resolved MAL ID
   if (storage.malToken) {
-    try {
-      const searchRes = await malApiRequest(`manga?q=${encodeURIComponent(cleanTitle)}&limit=1&fields=id,title,alternative_titles,main_picture,status,num_chapters,my_list_status`, 'GET', null, storage.malToken);
-      
-      if (searchRes.data && searchRes.data.length > 0) {
-        const malNode = searchRes.data[0].node;
-        const standardizedMedia = standardizeMalMedia(malNode, malNode.my_list_status, 'MANGA');
-        return { media: standardizedMedia, chapter, token: storage.malToken, platform: 'MAL' };
-      }
-    } catch (e) { console.log("MAL search failed, falling back to Custom OTG..."); }
+    if (resolvedMalId) {
+      try {
+        const searchRes = await malApiRequest(`manga/${resolvedMalId}?fields=id,title,alternative_titles,main_picture,status,num_chapters,my_list_status`, 'GET', null, storage.malToken);
+        if (searchRes && searchRes.id) {
+          const standardizedMedia = standardizeMalMedia(searchRes, searchRes.my_list_status, 'MANGA');
+          return { media: standardizedMedia, chapter, token: storage.malToken, platform: 'MAL' };
+        }
+      } catch (e) {}
+    }
+
+    for (const term of perms) {
+      try {
+        const searchRes = await malApiRequest(`manga?q=${encodeURIComponent(term)}&limit=1&fields=id,title,alternative_titles,main_picture,status,num_chapters,my_list_status`, 'GET', null, storage.malToken);
+        if (searchRes.data && searchRes.data.length > 0) {
+          const malNode = searchRes.data[0].node;
+          const standardizedMedia = standardizeMalMedia(malNode, malNode.my_list_status, 'MANGA');
+          return { media: standardizedMedia, chapter, token: storage.malToken, platform: 'MAL' };
+        }
+      } catch (e) {}
+    }
   }
 
   return null; 
 }
 
-async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSeconds, frameId = 0) {
+async function processMangaAutoUpdate(cleanTitle, chapter, tabId, readingData, frameId = 0) {
+  let xpData = null; 
+
   try {
     const result = await findUnifiedManga(cleanTitle, chapter);
     
@@ -547,11 +542,9 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
 
     const { media, token, platform } = result;
     const intChapter = Math.floor(result.chapter);
-    
     const currentProg = media.mediaListEntry ? media.mediaListEntry.progress : 0;
     const mangaName = media.title.english || media.title.romaji;
     let isCompleted = false; 
-    let xpData = null; // ✅ FIX: Declared at top level of try-block
 
     const storage = await chrome.storage.local.get(['anilistUserId', 'malToken']);
     let updatedPlatforms = [];
@@ -570,11 +563,7 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
 
       if (platform === 'ANILIST') {
         try {
-          const mutation = `
-            mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) {
-              SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id }
-            }
-          `;
+          const mutation = `mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus, $startedAt: FuzzyDateInput, $completedAt: FuzzyDateInput) { SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status, startedAt: $startedAt, completedAt: $completedAt) { id } }`;
           const variables = { mediaId: media.id, progress: intChapter, status: newStatus };
           if (startedAt) variables.startedAt = startedAt;
           if (completedAt) variables.completedAt = completedAt;
@@ -585,40 +574,45 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
           chrome.storage.local.get(['full_watchlist_cache'], (res) => {
               if (res.full_watchlist_cache && res.full_watchlist_cache.data) {
                   const entry = res.full_watchlist_cache.data.find(e => e.media.id === media.id);
-                  if (entry) {
-                      entry.progress = intChapter;
-                      entry.status = newStatus;
-                  } else {
-                      res.full_watchlist_cache.data.push({ progress: intChapter, status: newStatus, media: media });
-                  }
+                  if (entry) { entry.progress = intChapter; entry.status = newStatus; } 
+                  else { res.full_watchlist_cache.data.push({ progress: intChapter, status: newStatus, media: media }); }
                   chrome.storage.local.set({ full_watchlist_cache: res.full_watchlist_cache });
               }
               setTimeout(() => chrome.storage.local.set({ trigger_dom_refresh: Date.now() }), 500);
           });
           processOfflineQueue();
-        } catch (networkError) {
-          queueFailedUpdate(media.id, intChapter, newStatus, token);
-        }
+        } catch (networkError) { queueFailedUpdate(media.id, intChapter, newStatus, token); }
 
         if (media.idMal && storage.malToken) {
           try {
             await updateMalProgress(media.idMal, intChapter, newStatus, 'MANGA', storage.malToken);
             updatedPlatforms.push("MAL");
-          } catch (e) {
-            console.error("MAL Dual-Sync Failed:", e);
-          }
+          } catch (e) { console.error("MAL Dual-Sync Failed:", e); }
         }
       } else if (platform === 'MAL') {
         try {
           await updateMalProgress(media.idMal || Math.abs(media.id), intChapter, newStatus, 'MANGA', token);
           updatedPlatforms.push("MAL");
-        } catch (e) {
-          console.error("MAL Update Failed:", e);
-        }
+        } catch (e) { console.error("MAL Update Failed:", e); }
       }
 
       if (storage.anilistUserId) {
-        xpData = await syncUserStatsToSupabase(storage.anilistUserId, trueReadSeconds);
+        // ✅ MANGA ANTI-EXPLOIT XP LOGIC
+        let calculatedXp = 1; // Base 1 XP
+        
+        if (readingData && readingData.readingType === 'page' && readingData.totalPages > 0) {
+          calculatedXp += Math.floor(readingData.totalPages / 5);
+        } else if (readingData && readingData.readingType === 'scroll' && readingData.viewportHeight > 0) {
+          const virtualPages = Math.floor(readingData.scrollHeight / readingData.viewportHeight);
+          calculatedXp += Math.floor(virtualPages / 14);
+        }
+        
+        // Cap XP to 50 per chapter to prevent infinite scroll bugs
+        if (calculatedXp > 50) calculatedXp = 50;
+        
+        // Convert to seconds (1 XP = 60s) for the unified backend function
+        const xpAsSeconds = calculatedXp * 60;
+        xpData = await syncUserStatsToSupabase(storage.anilistUserId, xpAsSeconds);
       }
       
     } else if (media.chapters && currentProg >= media.chapters && media.status === 'FINISHED') {
@@ -626,24 +620,15 @@ async function processMangaAutoUpdate(cleanTitle, chapter, tabId, trueReadSecond
     }
 
     const activeSessions = await getSessionData('activeSessions');
-    if (activeSessions[tabId]) {
-      delete activeSessions[tabId];
-      await setSessionData('activeSessions', activeSessions);
-    }
-
-    if (storage.anilistUserId) {
-      await deleteOtgTimeFromSupabase(storage.anilistUserId, media.id, intChapter);
-    }
+    if (activeSessions[tabId]) { delete activeSessions[tabId]; await setSessionData('activeSessions', activeSessions); }
+    if (storage.anilistUserId) await deleteOtgTimeFromSupabase(storage.anilistUserId, media.id, intChapter);
 
     chrome.action.setBadgeBackgroundColor({ color: '#4cca51' }); 
     chrome.action.setBadgeText({ text: '✓' });
     
     let platformText = updatedPlatforms.length > 1 ? "both AniList & MAL" : (updatedPlatforms[0] || "API");
     let toastMessage = `${mangaName} updated to Chapter ${intChapter} on ${platformText}!`;
-    
-    if (updatedPlatforms.length === 0 && currentProg >= intChapter) {
-        toastMessage = `${mangaName} is already at Chapter ${intChapter}!`;
-    }
+    if (updatedPlatforms.length === 0 && currentProg >= intChapter) toastMessage = `${mangaName} is already at Chapter ${intChapter}!`;
 
     if (isCompleted) {
       chrome.tabs.sendMessage(tabId, { action: "SHOW_RATING_MODAL", mediaId: media.id, malId: media.idMal, isMalOnly: media.isMalOnly, animeName: mangaName, mediaType: 'MANGA' });
@@ -783,10 +768,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   else if (message.action === "GET_USER_WATCHLIST") {
-    chrome.storage.local.get(['full_watchlist_cache', 'anilistToken', 'anilistUserId'], async (res) => {
-      // Use cache if it's less than 2 hours old AND not empty
-      if (res.full_watchlist_cache && res.full_watchlist_cache.data.length > 0 && (Date.now() - res.full_watchlist_cache.timestamp < 7200000)) {
-        sendResponse({ watchlist: res.full_watchlist_cache.data });
+    const mType = message.mediaType || 'ANIME'; // Force strict filtering
+    const cacheKey = `full_watchlist_cache_${mType}`;
+
+    chrome.storage.local.get([cacheKey, 'anilistToken', 'anilistUserId'], async (res) => {
+      if (res[cacheKey] && res[cacheKey].data.length > 0 && (Date.now() - res[cacheKey].timestamp < 7200000)) {
+        sendResponse({ watchlist: res[cacheKey].data });
         return;
       }
       
@@ -794,7 +781,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         try {
           const query = `
             query($userId: Int) {
-              MediaListCollection(userId: $userId, type: ANIME) {
+              MediaListCollection(userId: $userId, type: ${mType}) {
                 lists { entries { progress status score media { id idMal chapters episodes format nextAiringEpisode { airingAt episode } title { romaji english } } } }
               }
             }
@@ -805,11 +792,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               apiRes.data.MediaListCollection.lists.forEach(l => allEntries.push(...l.entries));
           }
           if (allEntries.length > 0) {
-              chrome.storage.local.set({ full_watchlist_cache: { timestamp: Date.now(), data: allEntries }});
+              chrome.storage.local.set({ [cacheKey]: { timestamp: Date.now(), data: allEntries }});
           }
           sendResponse({ watchlist: allEntries });
         } catch(e) {
-          sendResponse({ watchlist: res.full_watchlist_cache?.data || [] });
+          sendResponse({ watchlist: res[cacheKey]?.data || [] });
         }
       } else {
         sendResponse({ watchlist: [] });
@@ -1057,7 +1044,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       else if (attemptedMAL) overallSuccess = malSuccess;
 
       if (overallSuccess) {
-         chrome.storage.local.remove('full_watchlist_cache');
+         chrome.storage.local.remove(['full_watchlist_cache_ANIME', 'full_watchlist_cache_MANGA']); // ✅ Clears both separated caches
          chrome.storage.local.set({ trigger_dom_refresh: Date.now() });
       }
 
@@ -1129,8 +1116,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   else if (message.action === "AUTO_UPDATE_MANGA") {
-    // ✅ Add sender.frameId to the end of the arguments
-    processMangaAutoUpdate(message.cleanTitle, message.chapter, sender.tab.id, message.trueReadSeconds || 0, sender.frameId);
+    // ✅ Pass the new readingData object into the processing function
+    processMangaAutoUpdate(message.cleanTitle, message.chapter, sender.tab.id, message.readingData || {}, sender.frameId);
     sendResponse({ success: true }); 
     return false; 
   }

@@ -838,8 +838,8 @@ function renderWhitelistManager(domains) {
 // NEW: Added apiType as a parameter
 async function searchAnimeWithFallbacks(rawTitle, apiType) {
   const query = `
-    query ($search: String) {
-      Media (search: $search, type: ${apiType}, sort: SEARCH_MATCH) {
+    query ($search: String, $type: MediaType) {
+      Media (search: $search, type: $type, sort: SEARCH_MATCH) {
         id idMal status title { romaji english } coverImage { large medium } episodes chapters
         mediaListEntry { id progress status }
       }
@@ -847,49 +847,71 @@ async function searchAnimeWithFallbacks(rawTitle, apiType) {
   `;
 
   async function doSearch(term) {
-    const res = await apiRequest(query, { search: term });
+    const res = await apiRequest(query, { search: term, type: apiType });
     return res.data?.Media || null;
   }
 
-  // 1. Try AniList First
-  let media = await doSearch(rawTitle);
-  
-  if (!media) {
-    let noBrackets = rawTitle.replace(/\[.*?\]|\(.*?\)[^\w\s]*/g, '').trim();
-    if (noBrackets && noBrackets !== rawTitle) media = await doSearch(noBrackets);
-    
-    if (!media) {
-      let noPunctuation = noBrackets.replace(/[?!,]/g, '').replace(/\s+/g, ' ').trim();
-      if (noPunctuation && noPunctuation !== noBrackets) media = await doSearch(noPunctuation);
-      
-      if (!media) {
-        let splitTitle = rawTitle.split(/[:\-]/)[0].trim();
-        if (splitTitle && splitTitle !== rawTitle && splitTitle.length > 3) media = await doSearch(splitTitle);
-      }
-    }
+  // --- SMART TITLE SANITIZER ---
+  function getSearchPermutations(title) {
+    const base = title.replace(/[’‘`]/g, "'").replace(/\s+/g, ' ').trim();
+    const noBrackets = base.replace(/\[.*?\]|\(.*?\)/g, '').trim();
+    const noPunc = noBrackets.replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim();
+    const shortTerm = noPunc.split(' ').slice(0, 4).join(' '); // First 4 words fallback
+    const splitDash = base.split(/[:\-]/)[0].trim();
+    return [...new Set([base, noBrackets, noPunc, splitDash, shortTerm])].filter(t => t.length > 2);
   }
 
-  if (media) return media;
+  const perms = getSearchPermutations(rawTitle);
 
-  // 2. NEW: Try MyAnimeList (MAL) Fallback
+  // 1. Try strict AniList Search
+  for (const term of perms) {
+    let media = await doSearch(term);
+    if (media) return media;
+  }
+
+  // 2. NEW: The Progressive Tenrai API Search Bridge
+  const endpoint = apiType === 'ANIME' ? 'anime' : 'manga';
+  let resolvedMalId = null;
+  let tenraiNode = null;
+
+  for (const term of perms) {
+    try {
+      const tenraiRes = await fetch(`https://api.tenrai.org/v1/${endpoint}?q=${encodeURIComponent(term)}&limit=1`);
+      if (tenraiRes.ok) {
+        const tenraiData = await tenraiRes.json();
+        if (tenraiData?.data && tenraiData.data.length > 0) {
+          tenraiNode = tenraiData.data[0];
+          resolvedMalId = tenraiNode.mal_id;
+
+          // Cross-reference back to AniList using the exact MAL ID!
+          const crossRefQuery = `query($idMal: Int, $type: MediaType) { Media(idMal: $idMal, type: $type) { id idMal status title { romaji english } coverImage { large medium } episodes chapters mediaListEntry { id progress status } } }`;
+          const crossRefRes = await apiRequest(crossRefQuery, { idMal: resolvedMalId, type: apiType });
+          
+          if (crossRefRes.data?.Media) {
+              console.log(`[Shiinah] Tenrai Bridge Success! Matched via MAL ID: ${resolvedMalId}`);
+              return crossRefRes.data.Media; 
+          }
+          break; // Found the MAL ID, but AniList doesn't track it. Move to MAL fallback.
+        }
+      }
+    } catch(e) {}
+  }
+
+  // 3. Absolute Fallback to Official MAL API
   const storage = await chrome.storage.local.get(['malToken']);
   if (storage.malToken) {
-    const endpoint = apiType === 'ANIME' ? 'anime' : 'manga';
-    
-    async function doMalSearch(term) {
+    // If Tenrai found the MAL ID, fetch directly from MAL
+    if (resolvedMalId) {
       try {
-        const res = await fetch(`https://api.myanimelist.net/v2/${endpoint}?q=${encodeURIComponent(term)}&limit=1&fields=id,title,alternative_titles,main_picture,status,num_episodes,num_chapters,my_list_status`, {
+        const res = await fetch(`https://api.myanimelist.net/v2/${endpoint}/${resolvedMalId}?fields=id,title,alternative_titles,main_picture,status,num_episodes,num_chapters,my_list_status`, {
           headers: { 'Authorization': `Bearer ${storage.malToken}` }
         });
-        const data = await res.json();
-        
-        if (data && data.data && data.data.length > 0) {
-          const malNode = data.data[0].node;
-          // Format MAL data to perfectly mimic AniList structure for the UI
+        const malNode = await res.json();
+        if (malNode && malNode.id) {
           return {
-            id: malNode.id,
+            id: -malNode.id,
             idMal: malNode.id,
-            isMalOnly: true, // Flag to identify this as a MAL-exclusive find
+            isMalOnly: true,
             status: malNode.status ? malNode.status.toUpperCase() : "RELEASING",
             title: { romaji: malNode.title, english: malNode.alternative_titles?.en || malNode.title },
             coverImage: { large: malNode.main_picture?.large, medium: malNode.main_picture?.medium },
@@ -901,13 +923,51 @@ async function searchAnimeWithFallbacks(rawTitle, apiType) {
             } : null
           };
         }
-      } catch(e) { console.error("MAL Fallback Search Failed", e); }
-      return null;
+      } catch(e) {}
     }
 
-    let malMedia = await doMalSearch(rawTitle);
-    if (!malMedia) malMedia = await doMalSearch(rawTitle.replace(/\[.*?\]|\(.*?\)[^\w\s]*/g, '').trim());
-    if (malMedia) return malMedia;
+    // If Tenrai completely failed, text search MAL
+    for (const term of perms) {
+      try {
+        const res = await fetch(`https://api.myanimelist.net/v2/${endpoint}?q=${encodeURIComponent(term)}&limit=1&fields=id,title,alternative_titles,main_picture,status,num_episodes,num_chapters,my_list_status`, {
+          headers: { 'Authorization': `Bearer ${storage.malToken}` }
+        });
+        const data = await res.json();
+        if (data?.data && data.data.length > 0) {
+          const malNode = data.data[0].node;
+          return {
+            id: -malNode.id,
+            idMal: malNode.id,
+            isMalOnly: true,
+            status: malNode.status ? malNode.status.toUpperCase() : "RELEASING",
+            title: { romaji: malNode.title, english: malNode.alternative_titles?.en || malNode.title },
+            coverImage: { large: malNode.main_picture?.large, medium: malNode.main_picture?.medium },
+            episodes: apiType === 'ANIME' ? (malNode.num_episodes || null) : null,
+            chapters: apiType === 'MANGA' ? (malNode.num_chapters || null) : null,
+            mediaListEntry: malNode.my_list_status ? {
+              progress: apiType === 'ANIME' ? malNode.my_list_status.num_episodes_watched : malNode.my_list_status.num_chapters_read,
+              status: 'CURRENT'
+            } : null
+          };
+        }
+      } catch(e) {}
+    }
+  }
+
+  // 4. Ultimate Fallback: Create rich OTG save from Tenrai data
+  if (tenraiNode) {
+      console.log(`[Shiinah] Not on AniList/MAL. Using Tenrai data for rich OTG Save.`);
+      return {
+        id: -tenraiNode.mal_id, // Negative ID triggers OTG local saving
+        idMal: tenraiNode.mal_id,
+        isMalOnly: true,
+        status: tenraiNode.status ? tenraiNode.status.toUpperCase() : "RELEASING",
+        title: { romaji: tenraiNode.title, english: tenraiNode.title_english || tenraiNode.title },
+        coverImage: { large: tenraiNode.images?.jpg?.large_image_url || '', medium: tenraiNode.images?.jpg?.image_url || '' },
+        episodes: apiType === 'ANIME' ? (tenraiNode.episodes || null) : null,
+        chapters: apiType === 'MANGA' ? (tenraiNode.chapters || null) : null,
+        mediaListEntry: null 
+      };
   }
 
   return null; 
