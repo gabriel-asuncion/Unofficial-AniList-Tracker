@@ -2,8 +2,9 @@
 
 let siteForcedType = null; 
 
-chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) => {
+chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEnabled'], (result) => {
   const domains = result.whitelistedDomains || [];
+  let autoSkipEnabled = result.autoSkipEnabled || false; // ✅ Load auto-skip state
   
   let hostsToCheck = [window.location.hostname];
   if (window.location.ancestorOrigins) {
@@ -61,7 +62,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // ==========================================
   // 📜 WEBVTT SUBTITLE PARSER & ANALYZER
   // ==========================================
-  function parseSubtitlesForOpEd(vttContent, videoDuration) {
+  // ✅ SURGICAL FIX: Accepts dynamic targetDuration based on learned behavior
+  function parseSubtitlesForOpEd(vttContent, videoDuration, targetDuration = 88) {
     if (!vttContent || typeof vttContent !== 'string') return null;
 
     const parseTimestamp = (timeStr) => {
@@ -101,7 +103,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     if (cues.length === 0) return null;
 
     const maxSearchTime = Math.min(videoDuration * 0.5, 720);
-    const windowDuration = 88; 
+    const windowDuration = targetDuration; // ✅ Dynamic Window Search!
 
     for (let t = 0; t <= maxSearchTime - windowDuration; t += 5) {
       const windowStart = t;
@@ -121,7 +123,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     return null;
   }
 
-  async function fetchAndAnalyzeSubtitles(videoDuration) {
+  async function fetchAndAnalyzeSubtitles(videoDuration, targetDuration) {
     try {
       const trackElements = Array.from(document.querySelectorAll('track'));
       const subTrack = trackElements.find(t => t.src && (t.kind === 'subtitles' || t.kind === 'captions' || t.src.includes('.vtt')));
@@ -130,7 +132,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         const res = await fetch(subTrack.src);
         if (res.ok) {
           const vttText = await res.text();
-          return parseSubtitlesForOpEd(vttText, videoDuration);
+          return parseSubtitlesForOpEd(vttText, videoDuration, targetDuration); // ✅ Pass the dynamic duration down
         }
       }
     } catch (e) {
@@ -143,6 +145,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   // 📺 ANIME TRACKING & PLAYBACK ENGINE
   // ==========================================
   let activeWatchSeconds = 0;
+  let resumedOtgTime = 0; 
   let hasTriggeredUpdate = false;
   let trackedVideo = null;
   let currentUrl = location.href; 
@@ -158,9 +161,11 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
   let learnedSkipData = { op: 85, ed: 85 };
   let manualSeekStart = 0;
   let sessionSkips = [];
+  let customBtnAppearedAt = 0; // ✅ Tracks when the UI appeared for Leniency Logic
 
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.trackingThreshold) userThreshold = changes.trackingThreshold.newValue;
+    if (changes.autoSkipEnabled) autoSkipEnabled = changes.autoSkipEnabled.newValue; // ✅ Hot-reload auto-skip
   });
 
   function getDeepVideos(root = document) {
@@ -174,7 +179,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
 
   let skipSyncInterval = null;
   let customSkipSyncInterval = null;
-  let lastSkipTime = 0; // ✅ Global cooldown lock to prevent zombie buttons
+  let lastSkipTime = 0; 
 
   function mountSkipButton(activeSkip) {
     if (document.getElementById('aniskip-float-btn')) return;
@@ -192,7 +197,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       pointerEvents: 'auto', opacity: '1'
     });
 
-    // ✅ FADE LOGIC: Wait 5 seconds, drop to 8% opacity. Reset on hover.
     let fadeTimer;
     const triggerFadeOut = () => {
       btn.style.opacity = '1';
@@ -209,7 +213,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     btn.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation(); 
       if (trackedVideo && activeSkip && activeSkip.interval.endTime) {
-        lastSkipTime = Date.now(); // Lock it!
+        lastSkipTime = Date.now(); 
         trackedVideo.currentTime = activeSkip.interval.endTime;
         showInPageToast('success', 'Skipped', activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!');
         unmountSkipButton();
@@ -260,7 +264,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       return `${m}:${s}`;
     };
 
-    // ✅ FADE LOGIC
     let fadeTimer;
     const triggerFadeOut = () => {
       btn.style.opacity = '1';
@@ -274,16 +277,24 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
     btn.addEventListener('mouseenter', () => btn.style.backgroundColor = 'rgba(61, 180, 242, 0.9)');
     btn.addEventListener('mouseleave', () => btn.style.backgroundColor = 'rgba(21, 31, 46, 0.85)');
 
+    // ✅ LATE PRESS LENIENCY LOGIC
+    customBtnAppearedAt = trackedVideo.currentTime;
+
     btn.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation(); 
       if (!trackedVideo) return;
       lastSkipTime = Date.now(); 
       const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
-      const skipAmount = isOP ? learnedSkipData.op : learnedSkipData.ed;
+      const skipAmount = isOP ? (learnedSkipData.op || 85) : (learnedSkipData.ed || 85);
       
-      // ✅ Record manual skip timestamps
       const oldTime = trackedVideo.currentTime;
-      trackedVideo.currentTime += skipAmount;
+      
+      // Leniency check: If you click it late, it calculates from when it APPEARED, not from right now!
+      const targetTime = customBtnAppearedAt + skipAmount;
+      const finalJumpTime = Math.max(trackedVideo.currentTime + 5, targetTime); // Ensure we at least jump forward 5s
+      
+      trackedVideo.currentTime = finalJumpTime;
+      
       sessionSkips.push({
         skipType: isOP ? 'op' : 'ed',
         interval: { startTime: oldTime, endTime: trackedVideo.currentTime }
@@ -310,7 +321,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       btn.style.right = (window.innerWidth - rect.right + 30) + 'px';
       
       const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
-      const skipAmount = isOP ? learnedSkipData.op : learnedSkipData.ed;
+      const skipAmount = isOP ? (learnedSkipData.op || 85) : (learnedSkipData.ed || 85);
       btn.innerHTML = isOP ? `▶ Skip Intro (+${formatTime(skipAmount)})` : `▶ Skip Outro (+${formatTime(skipAmount)})`;
     }, 50);
   }
@@ -321,13 +332,13 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       return; 
     }
     
-    // ✅ MULTI-TAB FIX: If you aren't actively looking at this tab, go to sleep!
     if (document.visibilityState !== 'visible') return;
 
     if (getActiveMediaType() !== 'ANIME') return;
 
     if (location.href !== currentUrl || (trackedVideo && !trackedVideo.isConnected)) {
       activeWatchSeconds = 0;
+      resumedOtgTime = 0; 
       currentUrl = location.href;
       trackedVideo = null;        
       currentVideoSrc = "";       
@@ -382,13 +393,13 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         currentVideoSrc = trackedVideo.src;
         hasTriggeredUpdate = false; 
         otgLoaded = false; 
+        resumedOtgTime = 0; 
         resolvedOtgData = null; 
         aniSkipData = null; 
         hlsSkipData = null;
         if (skipButtonMounted) unmountSkipButton(); 
       }
 
-      // ✅ ZOMBIE FIX: If we skipped in the last 15 seconds, aggressively kill all remounting attempts
       if (Date.now() - lastSkipTime < 15000) {
         if (skipButtonMounted) unmountSkipButton();
         if (customSkipBtnMounted) {
@@ -399,8 +410,20 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
         if (aniSkipData && Array.isArray(aniSkipData)) {
           const ct = trackedVideo.currentTime;
           const activeSkip = aniSkipData.find(skip => ct >= skip.interval.startTime && ct <= skip.interval.endTime);
-          if (activeSkip) { if (!skipButtonMounted) mountSkipButton(activeSkip); } 
-          else { if (skipButtonMounted) unmountSkipButton(); }
+          
+          if (activeSkip) { 
+            // ✅ AUTO-SKIP EXECUTION (TIER 1 & 2)
+            if (autoSkipEnabled && activeSkip.interval.endTime) {
+              lastSkipTime = Date.now();
+              trackedVideo.currentTime = activeSkip.interval.endTime;
+              showInPageToast('success', 'Auto-Skipped', activeSkip.skipType === 'ed' ? 'Outro auto-skipped!' : 'Intro auto-skipped!');
+            } else {
+              if (!skipButtonMounted) mountSkipButton(activeSkip); 
+            }
+          } 
+          else { 
+            if (skipButtonMounted) unmountSkipButton(); 
+          }
         }
 
         if (customSkipBtnMounted && trackedVideo && aniSkipData === "not_found") {
@@ -408,7 +431,10 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
           if (customBtn) {
             const pct = trackedVideo.currentTime / trackedVideo.duration;
             if (pct < 0.5 || pct > 0.8) customBtn.style.display = 'block';
-            else customBtn.style.display = 'none';
+            else {
+              customBtn.style.display = 'none';
+              customBtnAppearedAt = 0; // Reset leniency timer when it hides naturally
+            }
           }
         }
       }
@@ -427,9 +453,9 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
           progress: (trackedVideo.currentTime / trackedVideo.duration) * 100,
           threshold: userThreshold,
           currentTime: trackedVideo.currentTime,
-          duration: trackedVideo.duration,   // ✅ Pass video duration
-          aniSkipData: aniSkipData,           // ✅ Pass official API skip intervals
-          sessionSkips: sessionSkips,         // ✅ Pass manual session skip intervals
+          duration: trackedVideo.duration, 
+          aniSkipData: aniSkipData,           
+          sessionSkips: sessionSkips,         
           isOtgLoaded: sendOtgStatus,
           resolvedData: resolvedOtgData,
           hasTriggeredUpdate: hasTriggeredUpdate
@@ -447,7 +473,10 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
                   aniSkipData = skipRes.results;
                   activeSkipTier = "AniSkip API";
                 } else {
-                  const subResult = await fetchAndAnalyzeSubtitles(trackedVideo.duration);
+                  // ✅ DYNAMIC TIER 2 VTT SEARCH: Uses learned duration instead of flat 88s
+                  const targetDuration = learnedSkipData ? learnedSkipData.op : 88;
+                  const subResult = await fetchAndAnalyzeSubtitles(trackedVideo.duration, targetDuration);
+                  
                   if (subResult && subResult.found) {
                     aniSkipData = [{ skipType: subResult.type, interval: subResult.interval }];
                     activeSkipTier = "In-House Data";
@@ -471,6 +500,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
             otgLoaded = true;
             const targetTime = response.otgTime;
             if (targetTime > 5 && trackedVideo.currentTime < 15) {
+              resumedOtgTime = targetTime; // ✅ Bank the earned OTG time!
               const executeSeek = () => {
                 try {
                   trackedVideo.currentTime = targetTime;
@@ -497,7 +527,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold'], (result) =
       if (trackedVideo.duration > 180 && trackedVideo.currentTime > 60 && (trackedVideo.currentTime / trackedVideo.duration) * 100 >= userThreshold && !hasTriggeredUpdate) {
         hasTriggeredUpdate = true;
         try {
-          chrome.runtime.sendMessage({ action: "AUTO_UPDATE_ANIME", trueWatchSeconds: activeWatchSeconds }).catch(() => {});
+          // ✅ Combine active tab time with the banked OTG time
+          chrome.runtime.sendMessage({ action: "AUTO_UPDATE_ANIME", trueWatchSeconds: activeWatchSeconds + resumedOtgTime }).catch(() => {});
         } catch(e) {}
       }
     }

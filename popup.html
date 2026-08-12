@@ -110,6 +110,18 @@
         <p style="font-size: 11px; opacity: 0.7; margin-top: 5px;">The media percentage required to trigger an auto-update.</p>
       </div>
 
+      <!-- ✅ NEW: AUTO-SKIP TOGGLE -->
+      <div style="margin-bottom: 25px; padding-top: 15px; border-top: 1px solid #2b3a4a;">
+        <label style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; cursor: pointer;">
+          <span style="color: #fff; font-weight: bold; font-size: 13px;">Auto-Skip Intros (Tier 1)</span>
+          <label class="toggle-switch-container">
+            <input type="checkbox" id="auto-skip-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </label>
+        <p style="font-size: 11px; opacity: 0.7; margin: 0;">Automatically bypasses intros when exact API data is found.</p>
+      </div>
+
       <div>
         <h4 style="margin-bottom: 10px;">Whitelisted Sites</h4>
         <div id="whitelist-manager-list" style="background-color: #0b1119; border: 1px solid #1a2636; border-radius: 6px; max-height: 150px; overflow-y: auto; padding: 5px;">

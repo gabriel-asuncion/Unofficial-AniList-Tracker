@@ -340,7 +340,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('settings-view').classList.remove('hidden');
       
       // FETCH ALL SETTINGS AND TOKENS
-      chrome.storage.local.get(['trackingThreshold', 'whitelistedDomains', 'anilistToken', 'malToken'], (res) => {
+      chrome.storage.local.get(['trackingThreshold', 'whitelistedDomains', 'anilistToken', 'malToken', 'autoSkipEnabled'], (res) => {
         // 1. Threshold Slider
         const threshold = res.trackingThreshold || 80;
         const slider = document.getElementById('threshold-slider');
@@ -350,6 +350,10 @@ document.addEventListener('DOMContentLoaded', () => {
           display.textContent = `${threshold}%`;
         }
         
+        // ✅ Load Auto-Skip State
+        const autoSkipToggle = document.getElementById('auto-skip-toggle');
+        if (autoSkipToggle) autoSkipToggle.checked = !!res.autoSkipEnabled;
+
         // 2. Whitelist Manager
         renderWhitelistManager(res.whitelistedDomains || []);
 
@@ -418,6 +422,14 @@ document.addEventListener('DOMContentLoaded', () => {
     thresholdSlider.addEventListener('change', (e) => {
       currentThreshold = parseInt(e.target.value, 10); 
       chrome.storage.local.set({ trackingThreshold: currentThreshold });
+    });
+  }
+
+  // ✅ NEW: Save Auto-Skip State
+  const autoSkipToggle = document.getElementById('auto-skip-toggle');
+  if (autoSkipToggle) {
+    autoSkipToggle.addEventListener('change', (e) => {
+      chrome.storage.local.set({ autoSkipEnabled: e.target.checked });
     });
   }
 
