@@ -1597,6 +1597,29 @@ function formatCountdown(seconds) {
 }
 
 function renderAnimeList(entries) {
+  // ✅ SURGICAL FIX: Inject Grid View CSS explicitly to position the badge below the episode tracker
+  if (!document.getElementById('shiinah-badge-fix')) {
+    const style = document.createElement('style');
+    style.id = 'shiinah-badge-fix';
+    style.textContent = `
+      .grid-view .quick-add-btn, 
+      .grid-layout .quick-add-btn,
+      [class*="grid"] .quick-add-btn {
+        position: absolute !important;
+        top: 32px !important; /* Positions it right below the Ep tracker */
+        left: 8px !important;
+        right: auto !important;
+        bottom: auto !important;
+        z-index: 50 !important;
+        padding: 2px 6px !important;
+        font-size: 10px !important;
+        background: rgba(11, 17, 25, 0.85) !important;
+        backdrop-filter: blur(2px);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   const visibleEntries = entries.filter(e => !hiddenMediaIds.includes(e.media.id));
   const container = document.getElementById('anime-list');
   container.innerHTML = ''; 
@@ -1636,10 +1659,17 @@ function renderAnimeList(entries) {
     item.setAttribute('data-title', `${media.title.romaji.toLowerCase()} ${media.title.english ? media.title.english.toLowerCase() : ''}`);
 
     let quickActionHtml = '';
+    
     if (entry.status !== 'CURRENT') {
       quickActionHtml = `<button class="quick-add-btn">Add</button>`;
-    } else if (progress < maxAired || maxAired === 0) {
-      quickActionHtml = `<button class="quick-add-btn">+1</button>`;
+    } else if (maxAired > 0 && progress < maxAired) {
+      // ✅ SURGICAL FIX: Removed brackets and boosted z-index to 50
+      const remainingAmount = maxAired - progress;
+      quickActionHtml = `
+        <div class="quick-add-btn" style="background: rgba(61,180,242,0.15); border: 1px solid var(--anilist-color, #3db4f2); color: var(--anilist-color, #3db4f2); font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.5); pointer-events: none; z-index: 50; display: flex; align-items: center; justify-content: center;">
+          ${remainingAmount}
+        </div>
+      `;
     }
 
     item.innerHTML = `
@@ -1670,8 +1700,6 @@ function renderAnimeList(entries) {
           quickActionBtn.textContent = '...';
           quickActionBtn.disabled = true;
           quickUpdateStatus(media.id, 'CURRENT', quickActionBtn);
-        } else {
-          handleQuickPlusOneClick(entry, quickActionBtn, item.querySelector('.progress-text'));
         }
       });
     }
