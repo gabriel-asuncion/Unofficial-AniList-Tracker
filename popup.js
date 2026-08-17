@@ -785,6 +785,21 @@ async function initializeApp() {
 
     if (typeof loadUserLevel === 'function') loadUserLevel(userId);
 
+    // ✅ FEATURE 3: Fetch Cloud Preferences & Check Nudge
+    chrome.runtime.sendMessage({ action: "FETCH_CLOUD_PREFS", userId: userId }, () => {
+      chrome.storage.local.get(['cloud_mal_linked', 'malToken'], (prefs) => {
+        const banner = document.getElementById('mal-link-banner');
+        const linkBtn = document.getElementById('banner-mal-link-btn');
+        // If Cloud says MAL is linked, but local token is missing, show the warning nudge
+        if (prefs.cloud_mal_linked && !prefs.malToken && banner) {
+          banner.classList.remove('hidden');
+          linkBtn.addEventListener('click', handleMalLoginClick);
+        } else if (banner) {
+          banner.classList.add('hidden');
+        }
+      });
+    });
+
     const foundAnimeOnTab = await checkCurrentTabForAnime();
     if (!foundAnimeOnTab) loadAnimeList(); 
   } catch (error) {
@@ -1606,7 +1621,7 @@ function renderAnimeList(entries) {
       .grid-layout .quick-add-btn,
       [class*="grid"] .quick-add-btn {
         position: absolute !important;
-        top: 32px !important; /* Positions it right below the Ep tracker */
+        top: 28px !important; /* Positions it right below the Ep tracker */
         left: 8px !important;
         right: auto !important;
         bottom: auto !important;
@@ -1629,83 +1644,154 @@ function renderAnimeList(entries) {
     return;
   }
 
-  entries.forEach(entry => {
-    const media = entry.media;
-    const progress = entry.progress || 0;
-    
-    // Dynamically check for chapters vs episodes
-    const totalMax = currentMode === 'ANIME' ? (media.episodes || '?') : (media.chapters || '?');
-    const unit = currentMode === 'ANIME' ? 'Ep' : 'Ch';
+  // Fetch the background-generated conflict cache
+  chrome.storage.local.get(['desync_cache'], (res) => {
+    const desyncCache = res.desync_cache || {};
 
-    let countdownHtml = '';
-    let maxAired = totalMax !== '?' ? totalMax : 0;
-    
-    // Countdown logic strictly for Anime Mode
-    if (currentMode === 'ANIME' && media.nextAiringEpisode) {
-      const timeStr = formatCountdown(media.nextAiringEpisode.timeUntilAiring);
-      const nextEp = media.nextAiringEpisode.episode;
-      maxAired = nextEp - 1;
-      const date = new Date(media.nextAiringEpisode.airingAt * 1000);
-      const exactTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    entries.forEach(entry => {
+      const media = entry.media;
+      const progress = entry.progress || 0;
+      
+      const totalMax = currentMode === 'ANIME' ? (media.episodes || '?') : (media.chapters || '?');
+      const unit = currentMode === 'ANIME' ? 'Ep' : 'Ch';
 
-      countdownHtml = `
-        <div class="countdown-text">Next: Ep ${nextEp} in ${timeStr}</div>
-        <div class="exact-air-time">Airs at ${exactTime}</div>
+      let countdownHtml = '';
+      let maxAired = totalMax !== '?' ? totalMax : 0;
+      
+      if (currentMode === 'ANIME' && media.nextAiringEpisode) {
+        const timeStr = formatCountdown(media.nextAiringEpisode.timeUntilAiring);
+        const nextEp = media.nextAiringEpisode.episode;
+        maxAired = nextEp - 1;
+        const date = new Date(media.nextAiringEpisode.airingAt * 1000);
+        const exactTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        countdownHtml = `
+          <div class="countdown-text">Next: Ep ${nextEp} in ${timeStr}</div>
+          <div class="exact-air-time">Airs at ${exactTime}</div>
+        `;
+      }
+
+      const item = document.createElement('div');
+      item.className = 'anime-list-item animated-view';
+      item.style.position = 'relative'; // Ensure absolute children anchor correctly
+      item.setAttribute('data-title', `${media.title.romaji.toLowerCase()} ${media.title.english ? media.title.english.toLowerCase() : ''}`);
+
+      let quickActionHtml = '';
+      if (entry.status !== 'CURRENT') {
+        quickActionHtml = `<button class="quick-add-btn">Add</button>`;
+      } else if (maxAired > 0 && progress < maxAired) {
+        const remainingAmount = maxAired - progress;
+        quickActionHtml = `
+          <div class="quick-add-btn" style="background: rgba(61,180,242,0.15); border: 1px solid var(--anilist-color, #3db4f2); color: var(--anilist-color, #3db4f2); font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.5); pointer-events: none; z-index: 50; display: flex; align-items: center; justify-content: center;">
+            ${remainingAmount}
+          </div>
+        `;
+      }
+
+      // ✅ FEATURE 1: Render the Red Warning Icon if desynced
+      let desyncAlertHtml = '';
+      if (desyncCache[media.id]) {
+        desyncAlertHtml = `<div class="desync-warning-icon" data-id="${media.id}" style="position: absolute; top: -5px; left: -5px; background: #e74c3c; color: #fff; border: 2px solid #0b1119; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.8); z-index: 60;" title="Sync Conflict! Click to resolve.">!</div>`;
+      }
+
+      item.innerHTML = `
+        ${desyncAlertHtml}
+        <img src="${media.coverImage.medium}" style="width: 40px; height: 55px; object-fit: cover; border-radius: 4px; margin-right: 10px;">
+        <div style="flex-grow: 1;">
+          <div class="anime-title-text" style="font-weight: bold; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;">
+            ${media.title.romaji}
+          </div>
+          <div class="progress-text" style="font-size: 12px; opacity: 0.8;">
+            ${unit}: ${progress} / ${totalMax}
+          </div>
+          ${countdownHtml}
+        </div>
+        ${quickActionHtml}
       `;
-    }
 
-    const item = document.createElement('div');
-    item.className = 'anime-list-item animated-view';
-    item.setAttribute('data-title', `${media.title.romaji.toLowerCase()} ${media.title.english ? media.title.english.toLowerCase() : ''}`);
+      const titleEl = item.querySelector('.anime-title-text');
+      titleEl.addEventListener('mouseenter', () => titleEl.textContent = media.title.english || media.title.romaji);
+      titleEl.addEventListener('mouseleave', () => titleEl.textContent = media.title.romaji);
 
-    let quickActionHtml = '';
-    
-    if (entry.status !== 'CURRENT') {
-      quickActionHtml = `<button class="quick-add-btn">Add</button>`;
-    } else if (maxAired > 0 && progress < maxAired) {
-      // ✅ SURGICAL FIX: Removed brackets and boosted z-index to 50
-      const remainingAmount = maxAired - progress;
-      quickActionHtml = `
-        <div class="quick-add-btn" style="background: rgba(61,180,242,0.15); border: 1px solid var(--anilist-color, #3db4f2); color: var(--anilist-color, #3db4f2); font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.5); pointer-events: none; z-index: 50; display: flex; align-items: center; justify-content: center;">
-          ${remainingAmount}
-        </div>
-      `;
-    }
-
-    item.innerHTML = `
-      <img src="${media.coverImage.medium}" style="width: 40px; height: 55px; object-fit: cover; border-radius: 4px; margin-right: 10px;">
-      <div style="flex-grow: 1;">
-        <div class="anime-title-text" style="font-weight: bold; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;">
-          ${media.title.romaji}
-        </div>
-        <div class="progress-text" style="font-size: 12px; opacity: 0.8;">
-          ${unit}: ${progress} / ${totalMax}
-        </div>
-        ${countdownHtml}
-      </div>
-      ${quickActionHtml}
-    `;
-
-    const titleEl = item.querySelector('.anime-title-text');
-    titleEl.addEventListener('mouseenter', () => titleEl.textContent = media.title.english || media.title.romaji);
-    titleEl.addEventListener('mouseleave', () => titleEl.textContent = media.title.romaji);
-
-    item.addEventListener('click', () => openDetailView(entry));
-
-    const quickActionBtn = item.querySelector('.quick-add-btn');
-    if (quickActionBtn) {
-      quickActionBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); 
-        if (entry.status !== 'CURRENT') {
-          quickActionBtn.textContent = '...';
-          quickActionBtn.disabled = true;
-          quickUpdateStatus(media.id, 'CURRENT', quickActionBtn);
-        }
+      item.addEventListener('click', (e) => {
+        // Prevent opening the detail modal if they click the warning icon
+        if (!e.target.classList.contains('desync-warning-icon')) openDetailView(entry);
       });
-    }
 
-    container.appendChild(item);
-  });
+      // ✅ FEATURE 1: Handle Warning Icon Click
+      const warningIcon = item.querySelector('.desync-warning-icon');
+      if (warningIcon) {
+        warningIcon.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const conf = desyncCache[media.id];
+          openDesyncModal(conf);
+        });
+      }
+
+      container.appendChild(item);
+    });
+  }); // <-- End of storage get wrap
+}
+
+// ✅ FEATURE 1: Modal Logic to resolve the discrepancy
+function openDesyncModal(conflictData) {
+  const modal = document.getElementById('desync-modal');
+  const titleEl = document.getElementById('desync-title');
+  const alBtn = document.getElementById('desync-al-btn');
+  const malBtn = document.getElementById('desync-mal-btn');
+  const cancelBtn = document.getElementById('desync-cancel-btn');
+
+  titleEl.textContent = conflictData.title;
+  alBtn.textContent = `AniList (Ep ${conflictData.alProgress})`;
+  malBtn.textContent = `MAL (Ep ${conflictData.malProgress})`;
+
+  modal.classList.remove('hidden');
+
+  // If user trusts AniList, Overwrite MAL
+  alBtn.onclick = () => {
+    alBtn.textContent = "Syncing...";
+    chrome.storage.local.get(['malToken'], async (res) => {
+      if (res.malToken) {
+        chrome.runtime.sendMessage({ action: "SAVE_ANIME_SCORE", mediaId: conflictData.malId, score: -1, isMalOnly: true, overrideProgress: conflictData.alProgress });
+        // NOTE: Uses the existing MAL update route in background.js via Mal Api Put
+        await fetch(`https://api.myanimelist.net/v2/anime/${conflictData.malId}/my_list_status`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${res.malToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ num_watched_episodes: conflictData.alProgress, status: 'watching' }).toString()
+        });
+      }
+      resolveModalAndReload(conflictData.mediaId);
+    });
+  };
+
+  // If user trusts MAL, Overwrite AniList
+  malBtn.onclick = () => {
+    malBtn.textContent = "Syncing...";
+    chrome.storage.local.get(['anilistToken'], async (res) => {
+      if (res.anilistToken) {
+        const mutation = `mutation ($mediaId: Int, $progress: Int) { SaveMediaListEntry (mediaId: $mediaId, progress: $progress) { id } }`;
+        await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${res.anilistToken}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ query: mutation, variables: { mediaId: conflictData.mediaId, progress: conflictData.malProgress }})
+        });
+      }
+      resolveModalAndReload(conflictData.mediaId);
+    });
+  };
+
+  cancelBtn.onclick = () => modal.classList.add('hidden');
+
+  function resolveModalAndReload(mediaId) {
+    chrome.storage.local.get(['desync_cache'], (res) => {
+      const cache = res.desync_cache || {};
+      delete cache[mediaId];
+      chrome.storage.local.set({ desync_cache: cache, trigger_dom_refresh: Date.now() }, () => {
+        modal.classList.add('hidden');
+        loadAnimeList(true); // Redraw the UI
+      });
+    });
+  }
 }
 
 // ==========================================

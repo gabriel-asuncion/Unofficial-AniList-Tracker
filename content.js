@@ -1,10 +1,101 @@
-// content.js - Unified Playback & Skip Engine
+// content.js - Unified Playback, Skip & PiP Engine
 
 let siteForcedType = null; 
+let trackedVideo = null; // Global reference for active video element
 
+// ==========================================
+// 🧠 GLOBAL MEDIA & VIDEO DETECTORS
+// ==========================================
+
+// Safely query all video elements, including those inside Shadow DOMs
+function getDeepVideos(root = document) {
+  let videos = Array.from(root.querySelectorAll('video'));
+  let allElements = root.querySelectorAll('*');
+  for (let el of allElements) {
+    if (el.shadowRoot) videos = videos.concat(getDeepVideos(el.shadowRoot));
+  }
+  return videos;
+}
+
+// Global function to determine if the active page is Anime or Manga
+function getActiveMediaType() {
+  const title = document.title || "";
+  const url = window.location.href || "";
+  
+  const animeRegex = /(?:Watch\s+)?(.*?)\s*(?:[-|—–:~]+\s*)?(?:Season\s*\d+\s*)?\b(?:Episode|Ep)\b\.?\s*0*(\d+)/i;
+  if (animeRegex.test(title)) return 'ANIME';
+  
+  const chapRegex = /\b(?:Chapter|Chap|Ch)\b\.?\s*0*(\d+(\.\d+)?)/i;
+  const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
+  if (chapRegex.test(title)) return 'MANGA';
+  
+  const isMangaSite = /manga|manhwa|manhua|webtoon|comic|read/i.test(title) || /manga|manhwa|manhua|webtoon|comic|read/i.test(url) || siteForcedType === 'MANGA';
+  if (isMangaSite && looseRegex.test(title)) return 'MANGA';
+  
+  const videos = getDeepVideos();
+  if (videos.some(v => !isNaN(v.duration) && v.duration > 100)) return 'ANIME';
+  
+  return siteForcedType || 'ANIME'; 
+}
+
+// ==========================================
+// 🍿 PICTURE-IN-PICTURE (PiP) ENGINE
+// ==========================================
+
+// Auto-PiP Fallback Listener for tab visibility changes
+document.addEventListener("visibilitychange", async () => {
+  // 1. Only trigger PiP for Anime sites
+  if (typeof getActiveMediaType === 'function' && getActiveMediaType() !== 'ANIME') return;
+
+  // 2. ✅ THE FIX: Prevent interference with Chrome's native Auto-PiP!
+  // Manually calling exitPictureInPicture() causes Chrome to permanently disable auto-PiP
+  // for the session because it assumes the user forcefully closed it.
+  if (trackedVideo && 'autoPictureInPicture' in trackedVideo) {
+    return; 
+  }
+
+  // 3. Manual fallback ONLY for browsers that don't support autoPictureInPicture
+  if (document.visibilityState === "hidden") {
+    if (trackedVideo && !trackedVideo.paused && !document.pictureInPictureElement) {
+      try {
+        await trackedVideo.requestPictureInPicture();
+      } catch (e) {
+        // Silently catch rejections caused by user gesture policies
+      }
+    }
+  } else if (document.visibilityState === "visible") {
+    if (document.pictureInPictureElement && trackedVideo && document.pictureInPictureElement === trackedVideo) {
+      try {
+        await document.exitPictureInPicture();
+      } catch (e) {}
+    }
+  }
+});
+
+// ==========================================
+// 🕸️ HLS NETWORK INTERCEPTOR
+// ==========================================
+let hlsSkipData = null;
+
+const script = document.createElement('script');
+script.src = chrome.runtime.getURL('hls-interceptor.js');
+script.onload = () => script.remove(); 
+(document.head || document.documentElement).appendChild(script);
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window || !event.data) return;
+  if (event.data.type === 'HLS_DISCONTINUITY_FOUND') {
+    hlsSkipData = { skipType: 'op', interval: event.data.interval };
+  }
+});
+
+// ==========================================
+// ⚙️ MAIN STORAGE & TRACKING INITIALIZATION
+// ==========================================
 chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEnabled'], (result) => {
   const domains = result.whitelistedDomains || [];
-  let autoSkipEnabled = result.autoSkipEnabled || false; // ✅ Load auto-skip state
+  let autoSkipEnabled = result.autoSkipEnabled || false; 
+  let userThreshold = result.trackingThreshold || 80; 
   
   let hostsToCheck = [window.location.hostname];
   if (window.location.ancestorOrigins) {
@@ -14,55 +105,15 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
   }
 
   const matchedDomain = domains.find(d => hostsToCheck.some(h => h.includes(typeof d === 'string' ? d : d.domain)));
-  if (!matchedDomain) return; 
+  const isHubSite = hostsToCheck.some(h => h.includes('anilist.co') || h.includes('myanimelist.net'));
+  
+  if (!matchedDomain && !isHubSite) return; 
 
-  siteForcedType = typeof matchedDomain === 'string' ? 'ANIME' : (matchedDomain.type || 'ANIME');
-
-  // ==========================================
-  // 🕸️ HLS NETWORK INTERCEPTOR
-  // ==========================================
-  let hlsSkipData = null;
-
-  const script = document.createElement('script');
-  script.src = chrome.runtime.getURL('hls-interceptor.js');
-  script.onload = () => script.remove(); 
-  (document.head || document.documentElement).appendChild(script);
-
-  window.addEventListener('message', (event) => {
-    if (event.source !== window || !event.data) return;
-    if (event.data.type === 'HLS_DISCONTINUITY_FOUND') {
-      console.log("[HLS Analyzer]: Discontinuity OP/ED Found!", event.data.interval);
-      hlsSkipData = { skipType: 'op', interval: event.data.interval };
-    }
-  });
-
-  // ==========================================
-  // 🧠 SMART MEDIA DETECTOR
-  // ==========================================
-  function getActiveMediaType() {
-    const title = document.title || "";
-    const url = window.location.href || "";
-    
-    const animeRegex = /(?:Watch\s+)?(.*?)\s*(?:[-|—–:~]+\s*)?(?:Season\s*\d+\s*)?\b(?:Episode|Ep)\b\.?\s*0*(\d+)/i;
-    if (animeRegex.test(title)) return 'ANIME';
-    
-    const chapRegex = /\b(?:Chapter|Chap|Ch)\b\.?\s*0*(\d+(\.\d+)?)/i;
-    const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
-    if (chapRegex.test(title)) return 'MANGA';
-    
-    const isMangaSite = /manga|manhwa|manhua|webtoon|comic|read/i.test(title) || /manga|manhwa|manhua|webtoon|comic|read/i.test(url) || siteForcedType === 'MANGA';
-    if (isMangaSite && looseRegex.test(title)) return 'MANGA';
-    
-    const videos = getDeepVideos();
-    if (videos.some(v => !isNaN(v.duration) && v.duration > 100)) return 'ANIME';
-    
-    return siteForcedType; 
-  }
+  siteForcedType = matchedDomain ? (typeof matchedDomain === 'string' ? 'ANIME' : (matchedDomain.type || 'ANIME')) : 'ANIME';
 
   // ==========================================
   // 📜 WEBVTT SUBTITLE PARSER & ANALYZER
   // ==========================================
-  // ✅ SURGICAL FIX: Accepts dynamic targetDuration based on learned behavior
   function parseSubtitlesForOpEd(vttContent, videoDuration, targetDuration = 88) {
     if (!vttContent || typeof vttContent !== 'string') return null;
 
@@ -103,7 +154,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     if (cues.length === 0) return null;
 
     const maxSearchTime = Math.min(videoDuration * 0.5, 720);
-    const windowDuration = targetDuration; // ✅ Dynamic Window Search!
+    const windowDuration = targetDuration; 
 
     for (let t = 0; t <= maxSearchTime - windowDuration; t += 5) {
       const windowStart = t;
@@ -132,591 +183,490 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
         const res = await fetch(subTrack.src);
         if (res.ok) {
           const vttText = await res.text();
-          return parseSubtitlesForOpEd(vttText, videoDuration, targetDuration); // ✅ Pass the dynamic duration down
+          return parseSubtitlesForOpEd(vttText, videoDuration, targetDuration); 
         }
       }
-    } catch (e) {
-      console.log("[Subtitle Probe]: No readable subtitle tracks found.");
-    }
+    } catch (e) {}
     return null;
   }
 
   // ==========================================
-  // 📺 ANIME TRACKING & PLAYBACK ENGINE
+  // 📺 MEDIA TRACKING ENGINE
   // ==========================================
-  let activeWatchSeconds = 0;
-  let resumedOtgTime = 0; 
-  let hasTriggeredUpdate = false;
-  let trackedVideo = null;
-  let currentUrl = location.href; 
-  let currentVideoSrc = ""; 
-  let userThreshold = result.trackingThreshold || 80; 
-  let otgLoaded = false;
-  let otgSaveLock = false; 
-  let resolvedOtgData = null; 
-  let aniSkipData = null; 
-  let activeSkipTier = "Detecting...";
-  let skipButtonMounted = false;
-  let customSkipBtnMounted = false;
-  let learnedSkipData = { op: 85, ed: 85 };
-  let manualSeekStart = 0;
-  let sessionSkips = [];
-  let customBtnAppearedAt = 0; // ✅ Tracks when the UI appeared for Leniency Logic
+  if (matchedDomain) {
 
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.trackingThreshold) userThreshold = changes.trackingThreshold.newValue;
-    if (changes.autoSkipEnabled) autoSkipEnabled = changes.autoSkipEnabled.newValue; // ✅ Hot-reload auto-skip
-  });
+    let activeWatchSeconds = 0;
+    let resumedOtgTime = 0; 
+    let hasTriggeredUpdate = false;
+    let currentUrl = location.href; 
+    let currentVideoSrc = ""; 
+    let otgLoaded = false;
+    let otgSaveLock = false; 
+    let resolvedOtgData = null; 
+    let aniSkipData = null; 
+    let activeSkipTier = "Detecting...";
+    let skipButtonMounted = false;
+    let customSkipBtnMounted = false;
+    let learnedSkipData = { op: 85, ed: 85 };
+    let manualSeekStart = 0;
+    let sessionSkips = [];
+    let customBtnAppearedAt = 0; 
 
-  function getDeepVideos(root = document) {
-    let videos = Array.from(root.querySelectorAll('video'));
-    let allElements = root.querySelectorAll('*');
-    for (let el of allElements) {
-      if (el.shadowRoot) videos = videos.concat(getDeepVideos(el.shadowRoot));
-    }
-    return videos;
-  }
-
-  let skipSyncInterval = null;
-  let customSkipSyncInterval = null;
-  let lastSkipTime = 0; 
-
-  function mountSkipButton(activeSkip) {
-    if (document.getElementById('aniskip-float-btn')) return;
-    
-    const btn = document.createElement('button');
-    btn.id = 'aniskip-float-btn';
-    btn.innerHTML = activeSkip.skipType === 'ed' ? '▶ Skip Outro' : '▶ Skip Intro';
-    
-    Object.assign(btn.style, {
-      position: 'fixed', zIndex: '2147483647',
-      backgroundColor: 'rgba(21, 31, 46, 0.85)', color: '#fff', border: '1px solid #3db4f2',
-      padding: '12px 20px', borderRadius: '6px', cursor: 'pointer',
-      fontFamily: 'system-ui, sans-serif', fontWeight: 'bold', fontSize: '15px',
-      transition: 'opacity 0.5s ease, background-color 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-      pointerEvents: 'auto', opacity: '1'
+    chrome.storage.onChanged.addListener((changes) => {
+      if (changes.trackingThreshold) userThreshold = changes.trackingThreshold.newValue;
+      if (changes.autoSkipEnabled) autoSkipEnabled = changes.autoSkipEnabled.newValue; 
     });
 
-    let fadeTimer;
-    const triggerFadeOut = () => {
-      btn.style.opacity = '1';
-      clearTimeout(fadeTimer);
-      fadeTimer = setTimeout(() => { btn.style.opacity = '0.08'; }, 5000);
-    };
+    let skipSyncInterval = null;
+    let customSkipSyncInterval = null;
+    let lastSkipTime = 0; 
 
-    btn.addEventListener('mousemove', triggerFadeOut);
-    triggerFadeOut(); 
-
-    btn.addEventListener('mouseenter', () => btn.style.backgroundColor = 'rgba(61, 180, 242, 0.9)');
-    btn.addEventListener('mouseleave', () => btn.style.backgroundColor = 'rgba(21, 31, 46, 0.85)');
-    
-    btn.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation(); 
-      if (trackedVideo && activeSkip && activeSkip.interval.endTime) {
-        lastSkipTime = Date.now(); 
-        trackedVideo.currentTime = activeSkip.interval.endTime;
-        showInPageToast('success', 'Skipped', activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!');
-        unmountSkipButton();
-      }
-    });
-
-    const container = document.fullscreenElement || document.body;
-    container.appendChild(btn);
-    skipButtonMounted = true;
-
-    if (skipSyncInterval) clearInterval(skipSyncInterval);
-    skipSyncInterval = setInterval(() => {
-      if (!trackedVideo) return;
-      const currentContainer = document.fullscreenElement || document.body;
-      if (btn.parentElement !== currentContainer) currentContainer.appendChild(btn);
+    function mountSkipButton(activeSkip) {
+      if (document.getElementById('aniskip-float-btn')) return;
       
-      const rect = trackedVideo.getBoundingClientRect();
-      btn.style.bottom = (window.innerHeight - rect.bottom + 70) + 'px';
-      btn.style.right = (window.innerWidth - rect.right + 30) + 'px';
-    }, 50);
-  }
-
-  function unmountSkipButton() {
-    const btn = document.getElementById('aniskip-float-btn');
-    if (btn) btn.remove();
-    if (skipSyncInterval) clearInterval(skipSyncInterval);
-    skipButtonMounted = false;
-  }
-
-  function mountCustomSkipButton() {
-    if (document.getElementById('shiinah-custom-hotzone')) return;
-
-    const btn = document.createElement('button');
-    btn.id = 'shiinah-custom-hotzone';
-    
-    Object.assign(btn.style, {
-      position: 'fixed', zIndex: '2147483647', display: 'none',
-      backgroundColor: 'rgba(21, 31, 46, 0.85)', color: '#fff', border: '1px solid #3db4f2',
-      padding: '12px 20px', borderRadius: '6px', cursor: 'pointer',
-      fontFamily: 'system-ui, sans-serif', fontWeight: 'bold', fontSize: '15px',
-      transition: 'opacity 0.5s ease, background-color 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-      pointerEvents: 'auto', opacity: '1'
-    });
-
-    const formatTime = (secs) => {
-      const m = Math.floor(secs / 60);
-      const s = Math.floor(secs % 60).toString().padStart(2, '0');
-      return `${m}:${s}`;
-    };
-
-    let fadeTimer;
-    const triggerFadeOut = () => {
-      btn.style.opacity = '1';
-      clearTimeout(fadeTimer);
-      fadeTimer = setTimeout(() => { btn.style.opacity = '0.08'; }, 5000);
-    };
-
-    btn.addEventListener('mousemove', triggerFadeOut);
-    triggerFadeOut();
-
-    btn.addEventListener('mouseenter', () => btn.style.backgroundColor = 'rgba(61, 180, 242, 0.9)');
-    btn.addEventListener('mouseleave', () => btn.style.backgroundColor = 'rgba(21, 31, 46, 0.85)');
-
-    // ✅ LATE PRESS LENIENCY LOGIC
-    customBtnAppearedAt = trackedVideo.currentTime;
-
-    btn.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation(); 
-      if (!trackedVideo) return;
-      lastSkipTime = Date.now(); 
-      const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
-      const skipAmount = isOP ? (learnedSkipData.op || 85) : (learnedSkipData.ed || 85);
+      const btn = document.createElement('button');
+      btn.id = 'aniskip-float-btn';
+      btn.innerHTML = activeSkip.skipType === 'ed' ? '▶ Skip Outro' : '▶ Skip Intro';
       
-      const oldTime = trackedVideo.currentTime;
-      
-      // Leniency check: If you click it late, it calculates from when it APPEARED, not from right now!
-      const targetTime = customBtnAppearedAt + skipAmount;
-      const finalJumpTime = Math.max(trackedVideo.currentTime + 5, targetTime); // Ensure we at least jump forward 5s
-      
-      trackedVideo.currentTime = finalJumpTime;
-      
-      sessionSkips.push({
-        skipType: isOP ? 'op' : 'ed',
-        interval: { startTime: oldTime, endTime: trackedVideo.currentTime }
+      Object.assign(btn.style, {
+        position: 'fixed', zIndex: '2147483647',
+        backgroundColor: 'rgba(21, 31, 46, 0.85)', color: '#fff', border: '1px solid #3db4f2',
+        padding: '12px 20px', borderRadius: '6px', cursor: 'pointer',
+        fontFamily: 'system-ui, sans-serif', fontWeight: 'bold', fontSize: '15px',
+        transition: 'opacity 0.5s ease, background-color 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+        pointerEvents: 'auto', opacity: '1'
       });
 
-      showInPageToast('info', 'Smart Skip', `Skipped ${skipAmount}s based on your history!`);
-      btn.style.display = 'none';
-      customSkipBtnMounted = false;
-      if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
-    });
+      let fadeTimer;
+      const triggerFadeOut = () => {
+        btn.style.opacity = '1';
+        clearTimeout(fadeTimer);
+        fadeTimer = setTimeout(() => { btn.style.opacity = '0.08'; }, 5000);
+      };
 
-    const container = document.fullscreenElement || document.body;
-    container.appendChild(btn);
-    customSkipBtnMounted = true;
+      btn.addEventListener('mousemove', triggerFadeOut);
+      triggerFadeOut(); 
 
-    if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
-    customSkipSyncInterval = setInterval(() => {
-      if (!trackedVideo) return;
-      const currentContainer = document.fullscreenElement || document.body;
-      if (btn.parentElement !== currentContainer) currentContainer.appendChild(btn);
+      btn.addEventListener('mouseenter', () => btn.style.backgroundColor = 'rgba(61, 180, 242, 0.9)');
+      btn.addEventListener('mouseleave', () => btn.style.backgroundColor = 'rgba(21, 31, 46, 0.85)');
       
-      const rect = trackedVideo.getBoundingClientRect();
-      btn.style.bottom = (window.innerHeight - rect.bottom + 70) + 'px';
-      btn.style.right = (window.innerWidth - rect.right + 30) + 'px';
-      
-      const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
-      const skipAmount = isOP ? (learnedSkipData.op || 85) : (learnedSkipData.ed || 85);
-      btn.innerHTML = isOP ? `▶ Skip Intro (+${formatTime(skipAmount)})` : `▶ Skip Outro (+${formatTime(skipAmount)})`;
-    }, 50);
-  }
-
-  const trackerIntervalId = setInterval(() => {
-    if (!chrome.runtime?.id) {
-      clearInterval(trackerIntervalId);
-      return; 
-    }
-    
-    if (document.visibilityState !== 'visible') return;
-
-    if (getActiveMediaType() !== 'ANIME') return;
-
-    if (location.href !== currentUrl || (trackedVideo && !trackedVideo.isConnected)) {
-      activeWatchSeconds = 0;
-      resumedOtgTime = 0; 
-      currentUrl = location.href;
-      trackedVideo = null;        
-      currentVideoSrc = "";       
-      hasTriggeredUpdate = false; 
-      otgLoaded = false;          
-      resolvedOtgData = null;  
-      aniSkipData = null; 
-      sessionSkips = [];
-      if (skipButtonMounted) unmountSkipButton(); 
-    }
-
-    if (trackedVideo && !trackedVideo.paused && document.visibilityState === 'visible') {
-      activeWatchSeconds++;
-    }
-
-    if (!trackedVideo || isNaN(trackedVideo.duration) || trackedVideo.duration < 300) {
-      const videos = getDeepVideos(document);
-      let maxDuration = 0;
-      let longestVideo = null;
-      
-      videos.forEach(v => {
-        if (!isNaN(v.duration) && v.duration > maxDuration) {
-          maxDuration = v.duration;
-          longestVideo = v;
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation(); 
+        if (trackedVideo && activeSkip && activeSkip.interval.endTime) {
+          lastSkipTime = Date.now(); 
+          trackedVideo.currentTime = activeSkip.interval.endTime;
+          showInPageToast('success', 'Skipped', activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!');
+          unmountSkipButton();
         }
       });
-      
-      if (maxDuration > 300) {
-        trackedVideo = longestVideo;
+
+      const container = document.fullscreenElement || document.body;
+      container.appendChild(btn);
+      skipButtonMounted = true;
+
+      if (skipSyncInterval) clearInterval(skipSyncInterval);
+      skipSyncInterval = setInterval(() => {
+        if (!trackedVideo) return;
+        const currentContainer = document.fullscreenElement || document.body;
+        if (btn.parentElement !== currentContainer) currentContainer.appendChild(btn);
         
-        if (!trackedVideo.hasAttribute('data-seek-tracked')) {
-          trackedVideo.setAttribute('data-seek-tracked', 'true');
-          trackedVideo.addEventListener('seeking', () => { if (manualSeekStart === 0) manualSeekStart = trackedVideo.currentTime; });
-          trackedVideo.addEventListener('seeked', () => {
-            if (manualSeekStart > 0 && resolvedOtgData) {
-              let diff = trackedVideo.currentTime - manualSeekStart;
-              if (diff > 70 && diff < 100) {
-                let isOP = manualSeekStart < (trackedVideo.duration * 0.5);
-                chrome.runtime.sendMessage({ action: "SAVE_LEARNED_SKIP", mediaId: resolvedOtgData.mediaId, isOP: isOP, duration: diff });
-                if (isOP) learnedSkipData.op = Math.round(diff) - 1;
-                else learnedSkipData.ed = Math.round(diff) - 1;
-              }
-              manualSeekStart = 0;
-            }
-          });
-        }
-      }
+        const rect = trackedVideo.getBoundingClientRect();
+        btn.style.bottom = (window.innerHeight - rect.bottom + 70) + 'px';
+        btn.style.right = (window.innerWidth - rect.right + 30) + 'px';
+      }, 50);
     }
 
-    if (trackedVideo && !isNaN(trackedVideo.duration) && trackedVideo.duration > 0) {
-      if (trackedVideo.src !== currentVideoSrc) {
-        currentVideoSrc = trackedVideo.src;
-        hasTriggeredUpdate = false; 
-        otgLoaded = false; 
-        resumedOtgTime = 0; 
-        resolvedOtgData = null; 
-        aniSkipData = null; 
-        hlsSkipData = null;
+    function unmountSkipButton() {
+      const btn = document.getElementById('aniskip-float-btn');
+      if (btn) btn.remove();
+      if (skipSyncInterval) clearInterval(skipSyncInterval);
+      skipButtonMounted = false;
+    }
+
+    function mountCustomSkipButton() {
+      if (document.getElementById('shiinah-custom-hotzone')) return;
+
+      const btn = document.createElement('button');
+      btn.id = 'shiinah-custom-hotzone';
+      
+      Object.assign(btn.style, {
+        position: 'fixed', zIndex: '2147483647', display: 'none',
+        backgroundColor: 'rgba(21, 31, 46, 0.85)', color: '#fff', border: '1px solid #3db4f2',
+        padding: '12px 20px', borderRadius: '6px', cursor: 'pointer',
+        fontFamily: 'system-ui, sans-serif', fontWeight: 'bold', fontSize: '15px',
+        transition: 'opacity 0.5s ease, background-color 0.2s ease', backdropFilter: 'blur(4px)', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+        pointerEvents: 'auto', opacity: '1'
+      });
+
+      const formatTime = (secs) => {
+        const m = Math.floor(secs / 60);
+        const s = Math.floor(secs % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+      };
+
+      let fadeTimer;
+      const triggerFadeOut = () => {
+        btn.style.opacity = '1';
+        clearTimeout(fadeTimer);
+        fadeTimer = setTimeout(() => { btn.style.opacity = '0.08'; }, 5000);
+      };
+
+      btn.addEventListener('mousemove', triggerFadeOut);
+      triggerFadeOut();
+
+      btn.addEventListener('mouseenter', () => btn.style.backgroundColor = 'rgba(61, 180, 242, 0.9)');
+      btn.addEventListener('mouseleave', () => btn.style.backgroundColor = 'rgba(21, 31, 46, 0.85)');
+
+
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation(); 
+        if (!trackedVideo) return;
+        lastSkipTime = Date.now(); 
+        const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
+        const skipAmount = isOP ? (learnedSkipData.op || 85) : (learnedSkipData.ed || 85);
+        
+        const oldTime = trackedVideo.currentTime;
+        const targetTime = customBtnAppearedAt + skipAmount;
+        const finalJumpTime = Math.max(trackedVideo.currentTime + 5, targetTime); 
+        
+        trackedVideo.currentTime = finalJumpTime;
+        
+        sessionSkips.push({
+          skipType: isOP ? 'op' : 'ed',
+          interval: { startTime: oldTime, endTime: trackedVideo.currentTime }
+        });
+
+        showInPageToast('info', 'Smart Skip', `Skipped ${skipAmount}s based on your history!`);
+        btn.style.display = 'none';
+        customSkipBtnMounted = false;
+        if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
+      });
+
+      const container = document.fullscreenElement || document.body;
+      container.appendChild(btn);
+      customSkipBtnMounted = true;
+
+      if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
+      customSkipSyncInterval = setInterval(() => {
+        if (!trackedVideo) return;
+        const currentContainer = document.fullscreenElement || document.body;
+        if (btn.parentElement !== currentContainer) currentContainer.appendChild(btn);
+        
+        const rect = trackedVideo.getBoundingClientRect();
+        btn.style.bottom = (window.innerHeight - rect.bottom + 70) + 'px';
+        btn.style.right = (window.innerWidth - rect.right + 30) + 'px';
+        
+        const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
+        const skipAmount = isOP ? (learnedSkipData.op || 85) : (learnedSkipData.ed || 85);
+        btn.innerHTML = isOP ? `▶ Skip Intro (+${formatTime(skipAmount)})` : `▶ Skip Outro (+${formatTime(skipAmount)})`;
+      }, 50);
+    }
+
+    const trackerIntervalId = setInterval(() => {
+      if (!chrome.runtime?.id) { clearInterval(trackerIntervalId); return; }
+      if (document.visibilityState !== 'visible') return;
+      if (getActiveMediaType() !== 'ANIME') return;
+
+      if (location.href !== currentUrl || (trackedVideo && !trackedVideo.isConnected)) {
+        activeWatchSeconds = 0; resumedOtgTime = 0; currentUrl = location.href;
+        trackedVideo = null; currentVideoSrc = ""; hasTriggeredUpdate = false; 
+        otgLoaded = false; resolvedOtgData = null; aniSkipData = null; 
+        sessionSkips = []; customBtnAppearedAt = 0; // ✅ Added here
         if (skipButtonMounted) unmountSkipButton(); 
       }
 
-      if (Date.now() - lastSkipTime < 15000) {
-        if (skipButtonMounted) unmountSkipButton();
-        if (customSkipBtnMounted) {
-          const customBtn = document.getElementById('shiinah-custom-hotzone');
-          if (customBtn) customBtn.style.display = 'none';
-        }
-      } else {
-        if (aniSkipData && Array.isArray(aniSkipData)) {
-          const ct = trackedVideo.currentTime;
-          const activeSkip = aniSkipData.find(skip => ct >= skip.interval.startTime && ct <= skip.interval.endTime);
+      if (trackedVideo && !trackedVideo.paused && document.visibilityState === 'visible') {
+        activeWatchSeconds++;
+      }
+
+      if (!trackedVideo || isNaN(trackedVideo.duration) || trackedVideo.duration < 300) {
+        const videos = getDeepVideos(document);
+        let maxDuration = 0; let longestVideo = null;
+        
+        videos.forEach(v => {
+          if (!isNaN(v.duration) && v.duration > maxDuration) { maxDuration = v.duration; longestVideo = v; }
+        });
+        
+        if (maxDuration > 300) {
+          trackedVideo = longestVideo;
           
-          if (activeSkip) { 
-            // ✅ AUTO-SKIP EXECUTION (TIER 1 & 2)
-            if (autoSkipEnabled && activeSkip.interval.endTime) {
-              lastSkipTime = Date.now();
-              trackedVideo.currentTime = activeSkip.interval.endTime;
-              showInPageToast('success', 'Auto-Skipped', activeSkip.skipType === 'ed' ? 'Outro auto-skipped!' : 'Intro auto-skipped!');
-            } else {
-              if (!skipButtonMounted) mountSkipButton(activeSkip); 
-            }
-          } 
-          else { 
-            if (skipButtonMounted) unmountSkipButton(); 
+          // ✅ NATIVE AUTO-PIP ENABLEMENT
+          if ('autoPictureInPicture' in trackedVideo) {
+            trackedVideo.autoPictureInPicture = true;
+          }
+
+          if (!trackedVideo.hasAttribute('data-seek-tracked')) {
+            trackedVideo.setAttribute('data-seek-tracked', 'true');
+            trackedVideo.addEventListener('seeking', () => { if (manualSeekStart === 0) manualSeekStart = trackedVideo.currentTime; });
+            trackedVideo.addEventListener('seeked', () => {
+              if (manualSeekStart > 0 && resolvedOtgData) {
+                let diff = trackedVideo.currentTime - manualSeekStart;
+                if (diff > 70 && diff < 100) {
+                  let isOP = manualSeekStart < (trackedVideo.duration * 0.5);
+                  chrome.runtime.sendMessage({ action: "SAVE_LEARNED_SKIP", mediaId: resolvedOtgData.mediaId, isOP: isOP, duration: diff });
+                  if (isOP) learnedSkipData.op = Math.round(diff) - 1; else learnedSkipData.ed = Math.round(diff) - 1;
+                }
+                manualSeekStart = 0;
+              }
+            });
           }
         }
+      }
 
-        if (customSkipBtnMounted && trackedVideo && aniSkipData === "not_found") {
+      if (trackedVideo && !isNaN(trackedVideo.duration) && trackedVideo.duration > 0) {
+        if (trackedVideo.src !== currentVideoSrc) {
+          currentVideoSrc = trackedVideo.src; hasTriggeredUpdate = false; 
+          otgLoaded = false; resumedOtgTime = 0; resolvedOtgData = null; 
+          aniSkipData = null; hlsSkipData = null; customBtnAppearedAt = 0; // ✅ Added here
+          if (skipButtonMounted) unmountSkipButton(); 
+        }
+
+        if (Date.now() - lastSkipTime < 15000) {
+          if (skipButtonMounted) unmountSkipButton();
+          if (customSkipBtnMounted) {
+            const customBtn = document.getElementById('shiinah-custom-hotzone');
+            if (customBtn) customBtn.style.display = 'none';
+          }
+        } else {
+          if (aniSkipData && Array.isArray(aniSkipData)) {
+            const ct = trackedVideo.currentTime;
+            const activeSkip = aniSkipData.find(skip => ct >= skip.interval.startTime && ct <= skip.interval.endTime);
+            
+            if (activeSkip) { 
+              if (autoSkipEnabled && activeSkip.interval.endTime) {
+                lastSkipTime = Date.now();
+                trackedVideo.currentTime = activeSkip.interval.endTime;
+                showInPageToast('success', 'Auto-Skipped', activeSkip.skipType === 'ed' ? 'Outro auto-skipped!' : 'Intro auto-skipped!');
+              } else {
+                if (!skipButtonMounted) mountSkipButton(activeSkip); 
+              }
+            } else { 
+              if (skipButtonMounted) unmountSkipButton(); 
+            }
+          }
+
+          if (customSkipBtnMounted && trackedVideo && aniSkipData === "not_found") {
           const customBtn = document.getElementById('shiinah-custom-hotzone');
           if (customBtn) {
             const pct = trackedVideo.currentTime / trackedVideo.duration;
-            if (pct < 0.5 || pct > 0.8) customBtn.style.display = 'block';
-            else {
-              customBtn.style.display = 'none';
-              customBtnAppearedAt = 0; // Reset leniency timer when it hides naturally
+            
+            if (pct < 0.5 || pct > 0.8) {
+              // ✅ FIX: Only capture the time at the exact moment the button reveals itself
+              if (customBtn.style.display !== 'block') {
+                customBtn.style.display = 'block';
+                customBtnAppearedAt = trackedVideo.currentTime; 
+              }
+            } else { 
+              customBtn.style.display = 'none'; 
+              customBtnAppearedAt = 0; 
             }
           }
         }
+        }
+
+        if (otgSaveLock) return;
+
+        let sendOtgStatus = otgLoaded;
+        if (otgLoaded === false) { otgLoaded = 'fetching'; sendOtgStatus = false; }
+
+        try {
+          chrome.runtime.sendMessage({
+            action: "LIVE_VIDEO_PROGRESS", progress: (trackedVideo.currentTime / trackedVideo.duration) * 100,
+            threshold: userThreshold, currentTime: trackedVideo.currentTime, duration: trackedVideo.duration, 
+            aniSkipData: aniSkipData, sessionSkips: sessionSkips, isOtgLoaded: sendOtgStatus,
+            resolvedData: resolvedOtgData, hasTriggeredUpdate: hasTriggeredUpdate
+          }, (response) => {
+            if (chrome.runtime.lastError) return;
+            
+            if (response && response.resolvedData) {
+              resolvedOtgData = response.resolvedData;
+
+              if (!aniSkipData && resolvedOtgData.malId) {
+                chrome.runtime.sendMessage({
+                  action: "FETCH_ANISKIP", malId: resolvedOtgData.malId, episode: resolvedOtgData.episode
+                }, async (skipRes) => {
+                  if (skipRes && skipRes.found && skipRes.results && skipRes.results.length > 0) {
+                    aniSkipData = skipRes.results; activeSkipTier = "AniSkip API";
+                  } else {
+                    const targetDuration = learnedSkipData ? learnedSkipData.op : 88;
+                    const subResult = await fetchAndAnalyzeSubtitles(trackedVideo.duration, targetDuration);
+                    if (subResult && subResult.found) {
+                      aniSkipData = [{ skipType: subResult.type, interval: subResult.interval }]; activeSkipTier = "In-House Data";
+                    } else if (typeof hlsSkipData !== 'undefined' && hlsSkipData) {
+                      aniSkipData = [hlsSkipData]; activeSkipTier = "HLS Intercept";
+                    } else {
+                      aniSkipData = "not_found"; activeSkipTier = "Learned Behavior";
+                      chrome.runtime.sendMessage({ action: "GET_LEARNED_SKIP", mediaId: resolvedOtgData.mediaId }, (learnedRes) => {
+                        if (learnedRes) learnedSkipData = learnedRes;
+                        if (!customSkipBtnMounted) mountCustomSkipButton();
+                      });
+                    }
+                  }
+                });
+              }
+            }
+
+            if (response && response.otgTime !== undefined && response.otgTime !== null && otgLoaded === 'fetching') {
+              otgLoaded = true; const targetTime = response.otgTime;
+              if (targetTime > 5 && trackedVideo.currentTime < 15) {
+                resumedOtgTime = targetTime; 
+                const executeSeek = () => {
+                  try {
+                    trackedVideo.currentTime = targetTime;
+                    const mins = Math.floor(targetTime / 60); const secs = Math.floor(targetTime % 60).toString().padStart(2, '0');
+                    showInPageToast('info', 'OTG Resumed', `Jumped to ${mins}:${secs} successfully.`);
+                  } catch (err) {}
+                };
+                if (trackedVideo.readyState >= 1) executeSeek();
+                else { trackedVideo.addEventListener('loadedmetadata', executeSeek, { once: true }); trackedVideo.addEventListener('canplay', executeSeek, { once: true }); }
+              }
+            } else if (response && (response.otgTime === null || response.otgTime === undefined) && otgLoaded === 'fetching') {
+              otgLoaded = true; 
+            }
+          }); 
+        } catch (e) {
+          if (e.message.includes("Extension context invalidated")) clearInterval(trackerIntervalId);
+        }
+
+        if (trackedVideo.duration > 180 && trackedVideo.currentTime > 60 && (trackedVideo.currentTime / trackedVideo.duration) * 100 >= userThreshold && !hasTriggeredUpdate) {
+          hasTriggeredUpdate = true;
+          try { chrome.runtime.sendMessage({ action: "AUTO_UPDATE_ANIME", trueWatchSeconds: activeWatchSeconds + resumedOtgTime }).catch(() => {}); } catch(e) {}
+        }
+      }
+    }, 1000);
+
+    // ==========================================
+    // 📖 MANGA TRACKING ENGINE
+    // ==========================================
+    let mangaWatchSeconds = 0; let hasTriggeredMangaUpdate = false;
+    let currentMangaUrl = location.href; let currentRawTitle = document.title;
+    let mangaOtgLoaded = false; let resolvedMangaOtgData = null; let lastTriggeredChapter = null;
+    
+    function cleanMangaTitle(rawTitle) {
+      let chapter = null; let targetText = rawTitle; const url = window.location.href || "";
+      const chapRegex = /\b(?:Chapter|Chap|Ch)\b\.?\s*0*(\d+(\.\d+)?)/i;
+      const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
+      let chapMatch = rawTitle.match(chapRegex);
+      
+      if (!chapMatch) {
+        const isMangaSite = /manga|manhwa|manhua|webtoon|comic|read/i.test(rawTitle) || /manga|manhwa|manhua|webtoon|comic|read/i.test(url);
+        if (isMangaSite) chapMatch = rawTitle.match(looseRegex);
+      }
+      if (chapMatch) {
+        chapter = parseFloat(chapMatch[1]);
+        const leftSide = rawTitle.substring(0, chapMatch.index).trim();
+        const rightSide = rawTitle.substring(chapMatch.index + chapMatch[0].length).trim();
+        const cleanLeft = leftSide.replace(/[()[\]|]/g, '').trim();
+        if (cleanLeft === '' || /^(?:page\s*)?\d+\s*[-/]?\s*(?:\d+)?$/i.test(cleanLeft)) targetText = rightSide.replace(/[-|—|\|]\s*[a-zA-Z0-9]+$/i, '').trim();
+        else targetText = leftSide;
+      }
+      let clean = targetText.replace(/\b(?:Read|Watch|Free|English|Online|Scanlation|Scans|Scan|Manga|Manhwa|Manhua|Webtoon)\b/gi, '');
+      clean = clean.replace(/\[.*?\]|\(.*?\)/g, '');
+      clean = clean.replace(/^[-|—–:~,\|\s]+|[-|—–:~,\|\s]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+      return { title: clean, chapter: chapter };
+    }
+
+    const mangaIntervalId = setInterval(() => {
+      if (!chrome.runtime?.id) { clearInterval(mangaIntervalId); return; }
+      if (document.visibilityState !== 'visible') return;
+      if (getActiveMediaType() !== 'MANGA') return;
+
+      if (location.href !== currentMangaUrl || document.title !== currentRawTitle) {
+        mangaWatchSeconds = 0; hasTriggeredMangaUpdate = false;
+        currentMangaUrl = location.href; currentRawTitle = document.title;
+        mangaOtgLoaded = false; resolvedMangaOtgData = null;
       }
 
-      if (otgSaveLock) return;
+      const scrollPx = document.documentElement.scrollTop || document.body.scrollTop;
+      const maxScroll = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      const scrollPct = maxScroll > 0 ? (scrollPx / maxScroll) * 100 : 100;
 
-      let sendOtgStatus = otgLoaded;
-      if (otgLoaded === false) {
-        otgLoaded = 'fetching';
-        sendOtgStatus = false;
+      if (document.visibilityState === 'visible') mangaWatchSeconds++;
+
+      const parsedData = cleanMangaTitle(currentRawTitle);
+      let readingType = 'fallback'; let currentProg = 0; let totalProg = 0; let visualPct = 0;
+
+      const pageMatch = currentRawTitle.match(/(?:page\s*)?(\d+)\s*(?:\/|of)\s*(\d+)/i);
+      const prefixMatch = currentRawTitle.match(/^(?:page\s*)?(\d+)\s*[-|\|]/i);
+
+      if (pageMatch) {
+        readingType = 'page'; currentProg = parseInt(pageMatch[1], 10); totalProg = parseInt(pageMatch[2], 10); visualPct = (currentProg / totalProg) * 100;
+      } else if (prefixMatch) {
+        readingType = 'page'; currentProg = parseInt(prefixMatch[1], 10);
+        const domMatch = document.body.innerText.match(/(?:page\s*)?\d+\s*(?:\/|of)\s*(\d+)/i);
+        totalProg = domMatch ? parseInt(domMatch[1], 10) : 0; visualPct = totalProg > 0 ? (currentProg / totalProg) * 100 : 100; 
+      } else if (maxScroll > 150) {
+        readingType = 'scroll'; currentProg = scrollPct; visualPct = scrollPct;
+      } else {
+        readingType = 'fallback'; visualPct = Math.min((mangaWatchSeconds / 15) * 100, 100);
       }
+
+      let sendMangaOtgStatus = mangaOtgLoaded;
+      if (mangaOtgLoaded === false) { mangaOtgLoaded = 'fetching'; sendMangaOtgStatus = false; }
 
       try {
         chrome.runtime.sendMessage({
-          action: "LIVE_VIDEO_PROGRESS",
-          progress: (trackedVideo.currentTime / trackedVideo.duration) * 100,
-          threshold: userThreshold,
-          currentTime: trackedVideo.currentTime,
-          duration: trackedVideo.duration, 
-          aniSkipData: aniSkipData,           
-          sessionSkips: sessionSkips,         
-          isOtgLoaded: sendOtgStatus,
-          resolvedData: resolvedOtgData,
-          hasTriggeredUpdate: hasTriggeredUpdate
+          action: "LIVE_MANGA_PROGRESS", readingType: readingType, progress: currentProg, total: totalProg, pct: visualPct,
+          isCompleted: hasTriggeredMangaUpdate, isOtgLoaded: sendMangaOtgStatus,
+          parsedTitle: parsedData.title, chapter: parsedData.chapter, resolvedData: resolvedMangaOtgData
         }, (response) => {
           if (chrome.runtime.lastError) return;
-          
           if (response && response.resolvedData) {
-            resolvedOtgData = response.resolvedData;
-
-            if (!aniSkipData && resolvedOtgData.malId) {
-              chrome.runtime.sendMessage({
-                action: "FETCH_ANISKIP", malId: resolvedOtgData.malId, episode: resolvedOtgData.episode
-              }, async (skipRes) => {
-                if (skipRes && skipRes.found && skipRes.results && skipRes.results.length > 0) {
-                  aniSkipData = skipRes.results;
-                  activeSkipTier = "AniSkip API";
-                } else {
-                  // ✅ DYNAMIC TIER 2 VTT SEARCH: Uses learned duration instead of flat 88s
-                  const targetDuration = learnedSkipData ? learnedSkipData.op : 88;
-                  const subResult = await fetchAndAnalyzeSubtitles(trackedVideo.duration, targetDuration);
-                  
-                  if (subResult && subResult.found) {
-                    aniSkipData = [{ skipType: subResult.type, interval: subResult.interval }];
-                    activeSkipTier = "In-House Data";
-                  } else if (typeof hlsSkipData !== 'undefined' && hlsSkipData) {
-                    aniSkipData = [hlsSkipData];
-                    activeSkipTier = "HLS Intercept";
-                  } else {
-                    aniSkipData = "not_found"; 
-                    activeSkipTier = "Learned Behavior";
-                    chrome.runtime.sendMessage({ action: "GET_LEARNED_SKIP", mediaId: resolvedOtgData.mediaId }, (learnedRes) => {
-                      if (learnedRes) learnedSkipData = learnedRes;
-                      if (!customSkipBtnMounted) mountCustomSkipButton();
-                    });
-                  }
-                }
-              });
+            resolvedMangaOtgData = response.resolvedData;
+            if (response.resolvedData.isCustom && mangaOtgLoaded === 'fetching') {
+              showInPageToast('warning', 'Not on AniList', `"${response.resolvedData.customTitle}" was not found. Progress is securely saved locally to your OTG account!`);
             }
           }
-
-          if (response && response.otgTime !== undefined && response.otgTime !== null && otgLoaded === 'fetching') {
-            otgLoaded = true;
-            const targetTime = response.otgTime;
-            if (targetTime > 5 && trackedVideo.currentTime < 15) {
-              resumedOtgTime = targetTime; // ✅ Bank the earned OTG time!
-              const executeSeek = () => {
-                try {
-                  trackedVideo.currentTime = targetTime;
-                  const mins = Math.floor(targetTime / 60);
-                  const secs = Math.floor(targetTime % 60).toString().padStart(2, '0');
-                  showInPageToast('info', 'OTG Resumed', `Jumped to ${mins}:${secs} successfully.`);
-                } catch (err) {}
-              };
-              if (trackedVideo.readyState >= 1) {
-                executeSeek();
-              } else {
-                trackedVideo.addEventListener('loadedmetadata', executeSeek, { once: true });
-                trackedVideo.addEventListener('canplay', executeSeek, { once: true });
+          if (response && response.otgTime !== undefined && response.otgTime !== null && mangaOtgLoaded === 'fetching') {
+            mangaOtgLoaded = true;
+            if (readingType === 'scroll' && response.otgTime > 5) {
+              const targetPct = response.otgTime; const targetScroll = maxScroll * (targetPct / 100);
+              window.scrollTo({ top: targetScroll, behavior: 'smooth' });
+              showInPageToast('info', 'OTG Resumed', `Scrolled to ${targetPct.toFixed(1)}% successfully.`);
+            } else if (readingType === 'page' && response.otgTime > 0) {
+              const cleanCurrentUrl = window.location.href.split('#')[0].replace(/\/$/, '');
+              const cleanSavedUrl = response.otgUrl ? response.otgUrl.split('#')[0].replace(/\/$/, '') : null;
+              if (currentProg !== response.otgTime && cleanSavedUrl && cleanCurrentUrl !== cleanSavedUrl) {
+                showInPageToast('info', 'OTG Resuming', `Jumping to Page ${response.otgTime}...`);
+                setTimeout(() => { window.location.href = response.otgUrl; }, 1500); 
+              } else if (currentProg === response.otgTime) {
+                showInPageToast('info', 'OTG Resumed', `Welcome back to Page ${response.otgTime}!`);
               }
             }
-          } else if (response && (response.otgTime === null || response.otgTime === undefined) && otgLoaded === 'fetching') {
-            otgLoaded = true; 
+          } else if (response && (response.otgTime === null || response.otgTime === undefined) && mangaOtgLoaded === 'fetching') {
+            mangaOtgLoaded = true; 
           }
-        }); 
-      } catch (e) {
-        if (e.message.includes("Extension context invalidated")) clearInterval(trackerIntervalId);
-      }
+        });
+      } catch (e) {}
 
-      if (trackedVideo.duration > 180 && trackedVideo.currentTime > 60 && (trackedVideo.currentTime / trackedVideo.duration) * 100 >= userThreshold && !hasTriggeredUpdate) {
-        hasTriggeredUpdate = true;
-        try {
-          // ✅ Combine active tab time with the banked OTG time
-          chrome.runtime.sendMessage({ action: "AUTO_UPDATE_ANIME", trueWatchSeconds: activeWatchSeconds + resumedOtgTime }).catch(() => {});
-        } catch(e) {}
-      }
-    }
-  }, 1000);
-
-  // ==========================================
-  // 📖 MANGA TRACKING ENGINE
-  // ==========================================
-  let mangaWatchSeconds = 0;
-  let hasTriggeredMangaUpdate = false;
-  let currentMangaUrl = location.href;
-  let currentRawTitle = document.title;
-  let mangaOtgLoaded = false;
-  let resolvedMangaOtgData = null;
-  let lastTriggeredChapter = null;
-  
-  function cleanMangaTitle(rawTitle) {
-    let chapter = null;
-    let targetText = rawTitle;
-    const url = window.location.href || "";
-    
-    const chapRegex = /\b(?:Chapter|Chap|Ch)\b\.?\s*0*(\d+(\.\d+)?)/i;
-    const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
-    
-    let chapMatch = rawTitle.match(chapRegex);
-    
-    if (!chapMatch) {
-      const isMangaSite = /manga|manhwa|manhua|webtoon|comic|read/i.test(rawTitle) || /manga|manhwa|manhua|webtoon|comic|read/i.test(url);
-      if (isMangaSite) chapMatch = rawTitle.match(looseRegex);
-    }
-    
-    if (chapMatch) {
-      chapter = parseFloat(chapMatch[1]);
-      const leftSide = rawTitle.substring(0, chapMatch.index).trim();
-      const rightSide = rawTitle.substring(chapMatch.index + chapMatch[0].length).trim();
-      const cleanLeft = leftSide.replace(/[()[\]|]/g, '').trim();
-      if (cleanLeft === '' || /^(?:page\s*)?\d+\s*[-/]?\s*(?:\d+)?$/i.test(cleanLeft)) {
-        targetText = rightSide.replace(/[-|—|\|]\s*[a-zA-Z0-9]+$/i, '').trim();
-      } else {
-        targetText = leftSide;
-      }
-    }
-
-    let clean = targetText.replace(/\b(?:Read|Watch|Free|English|Online|Scanlation|Scans|Scan|Manga|Manhwa|Manhua|Webtoon)\b/gi, '');
-    clean = clean.replace(/\[.*?\]|\(.*?\)/g, '');
-    clean = clean.replace(/^[-|—–:~,\|\s]+|[-|—–:~,\|\s]+$/g, '').replace(/\s{2,}/g, ' ').trim();
-    return { title: clean, chapter: chapter };
-  }
-
-  const mangaIntervalId = setInterval(() => {
-    if (!chrome.runtime?.id) {
-      clearInterval(mangaIntervalId);
-      return; 
-    }
-
-    // ✅ MULTI-TAB FIX: If you aren't actively looking at this tab, go to sleep!
-    if (document.visibilityState !== 'visible') return;
-
-    if (getActiveMediaType() !== 'MANGA') return;
-
-    if (location.href !== currentMangaUrl || document.title !== currentRawTitle) {
-      mangaWatchSeconds = 0;
-      hasTriggeredMangaUpdate = false;
-      currentMangaUrl = location.href;
-      currentRawTitle = document.title;
-      mangaOtgLoaded = false;
-      resolvedMangaOtgData = null;
-    }
-
-    const scrollPx = document.documentElement.scrollTop || document.body.scrollTop;
-    const maxScroll = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-    const scrollPct = maxScroll > 0 ? (scrollPx / maxScroll) * 100 : 100;
-
-    if (document.visibilityState === 'visible') mangaWatchSeconds++;
-
-    const parsedData = cleanMangaTitle(currentRawTitle);
-    let readingType = 'fallback';
-    let currentProg = 0;
-    let totalProg = 0;
-    let visualPct = 0;
-
-    const pageMatch = currentRawTitle.match(/(?:page\s*)?(\d+)\s*(?:\/|of)\s*(\d+)/i);
-    const prefixMatch = currentRawTitle.match(/^(?:page\s*)?(\d+)\s*[-|\|]/i);
-
-    if (pageMatch) {
-      readingType = 'page';
-      currentProg = parseInt(pageMatch[1], 10);
-      totalProg = parseInt(pageMatch[2], 10);
-      visualPct = (currentProg / totalProg) * 100;
-    } else if (prefixMatch) {
-      readingType = 'page';
-      currentProg = parseInt(prefixMatch[1], 10);
-      const domMatch = document.body.innerText.match(/(?:page\s*)?\d+\s*(?:\/|of)\s*(\d+)/i);
-      totalProg = domMatch ? parseInt(domMatch[1], 10) : 0;
-      visualPct = totalProg > 0 ? (currentProg / totalProg) * 100 : 100; 
-    } else if (maxScroll > 150) {
-      readingType = 'scroll';
-      currentProg = scrollPct;
-      visualPct = scrollPct;
-    } else {
-      readingType = 'fallback';
-      visualPct = Math.min((mangaWatchSeconds / 15) * 100, 100);
-    }
-
-    let sendMangaOtgStatus = mangaOtgLoaded;
-    if (mangaOtgLoaded === false) {
-      mangaOtgLoaded = 'fetching';
-      sendMangaOtgStatus = false;
-    }
-
-    try {
-      chrome.runtime.sendMessage({
-        action: "LIVE_MANGA_PROGRESS",
-        readingType: readingType, progress: currentProg, total: totalProg, pct: visualPct,
-        isCompleted: hasTriggeredMangaUpdate, isOtgLoaded: sendMangaOtgStatus,
-        parsedTitle: parsedData.title, chapter: parsedData.chapter, resolvedData: resolvedMangaOtgData
-      }, (response) => {
-        if (chrome.runtime.lastError) return;
-        
-        if (response && response.resolvedData) {
-          resolvedMangaOtgData = response.resolvedData;
-          if (response.resolvedData.isCustom && mangaOtgLoaded === 'fetching') {
-            showInPageToast('warning', 'Not on AniList', `"${response.resolvedData.customTitle}" was not found. Progress is securely saved locally to your OTG account!`);
-          }
+      if (!hasTriggeredMangaUpdate) {
+        let shouldTrigger = false;
+        if (readingType === 'page') {
+          if (totalProg > 0 && currentProg >= totalProg) shouldTrigger = true;
+          else if (totalProg === 0 && mangaWatchSeconds >= 15) shouldTrigger = true;
+        } else if (readingType === 'scroll') {
+          if (scrollPct >= 90) shouldTrigger = true;
+        } else {
+          if (mangaWatchSeconds >= 15) shouldTrigger = true;
         }
 
-        if (response && response.otgTime !== undefined && response.otgTime !== null && mangaOtgLoaded === 'fetching') {
-          mangaOtgLoaded = true;
-          if (readingType === 'scroll' && response.otgTime > 5) {
-            const targetPct = response.otgTime;
-            const targetScroll = maxScroll * (targetPct / 100);
-            window.scrollTo({ top: targetScroll, behavior: 'smooth' });
-            showInPageToast('info', 'OTG Resumed', `Scrolled to ${targetPct.toFixed(1)}% successfully.`);
+        if (shouldTrigger) {
+          hasTriggeredMangaUpdate = true;
+          const parsedData = cleanMangaTitle(currentRawTitle);
+          if (parsedData.title && parsedData.chapter !== null && parsedData.chapter !== lastTriggeredChapter) {
+            lastTriggeredChapter = parsedData.chapter; 
+            try { 
+              chrome.runtime.sendMessage({ 
+                action: "AUTO_UPDATE_MANGA", cleanTitle: parsedData.title, chapter: parsedData.chapter, 
+                readingData: { readingType: readingType, totalPages: totalProg, scrollHeight: document.documentElement.scrollHeight, viewportHeight: document.documentElement.clientHeight, trueReadSeconds: mangaWatchSeconds }
+              }).catch(() => {}); 
+            } catch(e) {}
           }
-          else if (readingType === 'page' && response.otgTime > 0) {
-            const cleanCurrentUrl = window.location.href.split('#')[0].replace(/\/$/, '');
-            const cleanSavedUrl = response.otgUrl ? response.otgUrl.split('#')[0].replace(/\/$/, '') : null;
-
-            if (currentProg !== response.otgTime && cleanSavedUrl && cleanCurrentUrl !== cleanSavedUrl) {
-              showInPageToast('info', 'OTG Resuming', `Jumping to Page ${response.otgTime}...`);
-              setTimeout(() => { window.location.href = response.otgUrl; }, 1500); 
-            } 
-            else if (currentProg === response.otgTime) {
-              showInPageToast('info', 'OTG Resumed', `Welcome back to Page ${response.otgTime}!`);
-            }
-          }
-        // ✅ SURGICAL FIX: Prevent 'fetching' state from getting stuck if undefined
-        } else if (response && (response.otgTime === null || response.otgTime === undefined) && mangaOtgLoaded === 'fetching') {
-          mangaOtgLoaded = true; 
-        }
-      });
-    } catch (e) {}
-
-    if (!hasTriggeredMangaUpdate) {
-      let shouldTrigger = false;
-      if (readingType === 'page') {
-        if (totalProg > 0 && currentProg >= totalProg) shouldTrigger = true;
-        else if (totalProg === 0 && mangaWatchSeconds >= 15) shouldTrigger = true;
-      } else if (readingType === 'scroll') {
-        if (scrollPct >= 90) shouldTrigger = true;
-      } else {
-        if (mangaWatchSeconds >= 15) shouldTrigger = true;
-      }
-
-      if (shouldTrigger) {
-        hasTriggeredMangaUpdate = true;
-        const parsedData = cleanMangaTitle(currentRawTitle);
-        if (parsedData.title && parsedData.chapter !== null && parsedData.chapter !== lastTriggeredChapter) {
-          lastTriggeredChapter = parsedData.chapter; 
-          try { 
-            chrome.runtime.sendMessage({ 
-              action: "AUTO_UPDATE_MANGA", 
-              cleanTitle: parsedData.title, 
-              chapter: parsedData.chapter, 
-              // ✅ Pass the detailed reading metrics to the backend
-              readingData: {
-                readingType: readingType,
-                totalPages: totalProg,
-                scrollHeight: document.documentElement.scrollHeight,
-                viewportHeight: document.documentElement.clientHeight,
-                trueReadSeconds: mangaWatchSeconds
-              }
-            }).catch(() => {}); 
-          } catch(e) {}
         }
       }
-    }
-  }, 1000);
+    }, 1000);
+
+  } // End of matchedDomain check
 
   // ==========================================
   // 🍞 TOAST & MODAL UI SYSTEMS
@@ -726,54 +676,37 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
        showInPageToast('success', 'Update Successful', request.message, request.xpData);
        sendResponse({ success: true });
     }
-    // ✅ SMART SKIP ROUTER: Checks for exact data before defaulting to 90s
     else if (request.action === "SMART_SKIP" && trackedVideo) {
-      let skipped = false;
-      const ct = trackedVideo.currentTime;
-      
+      let skipped = false; const ct = trackedVideo.currentTime;
       if (aniSkipData && Array.isArray(aniSkipData)) {
         const activeSkip = aniSkipData.find(skip => ct >= skip.interval.startTime && ct <= skip.interval.endTime);
         if (activeSkip && activeSkip.interval.endTime) {
-          trackedVideo.currentTime = activeSkip.interval.endTime;
-          skipped = true;
+          trackedVideo.currentTime = activeSkip.interval.endTime; skipped = true;
           showInPageToast('success', 'Skipped', activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!');
         }
       }
-      
       if (!skipped) {
         const isOP = ct < (trackedVideo.duration * 0.5);
         const skipAmount = (aniSkipData === "not_found" && learnedSkipData) ? (isOP ? learnedSkipData.op : learnedSkipData.ed) : 90;
-        
-        // ✅ Record manual skip timestamps
-        const oldTime = trackedVideo.currentTime;
-        trackedVideo.currentTime += skipAmount;
-        sessionSkips.push({
-          skipType: isOP ? 'op' : 'ed',
-          interval: { startTime: oldTime, endTime: trackedVideo.currentTime }
-        });
-
+        const oldTime = trackedVideo.currentTime; trackedVideo.currentTime += skipAmount;
+        sessionSkips.push({ skipType: isOP ? 'op' : 'ed', interval: { startTime: oldTime, endTime: trackedVideo.currentTime } });
         showInPageToast('info', 'Skipped', `Skipped forward ${skipAmount} seconds.`);
       }
       sendResponse({ success: true });
     }
-
     else if (request.action === "SKIP_TIME" && trackedVideo) {
       trackedVideo.currentTime += request.amount;
       sendResponse({ success: true });
     }
-
     else if (request.action === "SHOW_RATING_MODAL") {
       showRatingToast(request.mediaId, request.animeName);
       sendResponse({ success: true });
     }
-    
-    
     else if (request.action === "GET_ACTIVE_SKIP_TIER") {
       sendResponse({ tierText: activeSkipTier });
     } else {
       sendResponse({ success: false });
     }
-    // ✅ SURGICAL FIX 1: Return false to safely close the message channel and kill the console error!
     return false; 
   });
 
@@ -801,21 +734,16 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
 
     const closeSvg = `<svg style="cursor:pointer; opacity:0.5; transition:opacity 0.2s;" width="18" height="18" fill="none" stroke="#aaa" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
 
-    // ✅ SURGICAL FIX 2: Execute Profile.js Math to calculate real XP bar widths
-    let xpHtml = '';
-    let animStyleHtml = '';
+    let xpHtml = ''; let animStyleHtml = '';
     
     if (type === 'success' && xpData) {
       const lvl = xpData.level;
       const currentLevelBaseMins = 500000 * Math.pow((lvl - 1) / 99, 2);
       const nextLevelMins = 500000 * Math.pow(lvl / 99, 2);
-      
       const minsRequiredForNext = nextLevelMins - currentLevelBaseMins;
       const previousTotalMins = xpData.totalMinutes - xpData.gainedMins;
-      
       const prevMinsIntoLevel = previousTotalMins - currentLevelBaseMins;
       const currentMinsIntoLevel = xpData.totalMinutes - currentLevelBaseMins;
-
       const previousPct = Math.min(100, Math.max(0, (prevMinsIntoLevel / minsRequiredForNext) * 100));
       const currentPct = Math.min(100, Math.max(0, (currentMinsIntoLevel / minsRequiredForNext) * 100));
       const gainedPct = currentPct - previousPct;
@@ -860,12 +788,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     closeBtn.addEventListener('click', () => { toast.style.right = '-400px'; setTimeout(() => toast.remove(), 400); });
 
     requestAnimationFrame(() => { setTimeout(() => { toast.style.right = '20px'; }, 100); });
-    setTimeout(() => {
-      if (container.contains(toast)) {
-        toast.style.right = '-400px';
-        setTimeout(() => { if (container.contains(toast)) toast.remove(); }, 400);
-      }
-    }, 5000); 
+    setTimeout(() => { if (container.contains(toast)) { toast.style.right = '-400px'; setTimeout(() => { if (container.contains(toast)) toast.remove(); }, 400); } }, 5000); 
   }
 
   function showRatingToast(mediaId, animeName) {
@@ -873,8 +796,7 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     if (existing) existing.remove();
 
     if (!document.getElementById('shiinah-rating-css')) {
-      const style = document.createElement('style');
-      style.id = 'shiinah-rating-css';
+      const style = document.createElement('style'); style.id = 'shiinah-rating-css';
       style.textContent = `
         #shiinah-score-slider { -webkit-appearance: none; width: 100%; height: 6px; background: linear-gradient(to right, #3db4f2 50%, #2b3a4a 50%); border-radius: 3px; outline: none; margin-top: 30px; }
         #shiinah-score-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #2b3a4a; border: 4px solid #fff; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.5); margin-top: -7px; }
@@ -888,19 +810,12 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
       document.head.appendChild(style);
     }
 
-    const container = document.createElement('div');
-    container.id = 'shiinah-rating-toast-container';
-    
+    const container = document.createElement('div'); container.id = 'shiinah-rating-toast-container';
     Object.assign(container.style, {
-      position: 'fixed', bottom: '30px', right: '30px',
-      backgroundColor: '#1f1f1f', border: '1px solid #333',
-      padding: '20px', borderRadius: '12px', width: '320px',
-      boxShadow: '0 10px 40px rgba(0,0,0,0.8)', color: '#fff',
-      zIndex: '2147483647', fontFamily: 'system-ui, -apple-system, sans-serif',
-      display: 'flex', flexDirection: 'column', gap: '8px',
-      animation: 'shiinah-slide-up 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-      transition: 'opacity 0.5s ease',
-      opacity: '1'
+      position: 'fixed', bottom: '30px', right: '30px', backgroundColor: '#1f1f1f', border: '1px solid #333',
+      padding: '20px', borderRadius: '12px', width: '320px', boxShadow: '0 10px 40px rgba(0,0,0,0.8)', color: '#fff',
+      zIndex: '2147483647', fontFamily: 'system-ui, -apple-system, sans-serif', display: 'flex', flexDirection: 'column', gap: '8px',
+      animation: 'shiinah-slide-up 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)', transition: 'opacity 0.5s ease', opacity: '1'
     });
 
     container.innerHTML = `
@@ -923,66 +838,34 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
 
     document.body.appendChild(container);
 
-    const slider = document.getElementById('shiinah-score-slider');
-    const bubble = document.getElementById('shiinah-tooltip-bubble');
-    const bubbleText = document.getElementById('shiinah-bubble-text');
-    const bubbleNum = document.getElementById('shiinah-bubble-num');
-    const submitBtn = document.getElementById('shiinah-submit-rating');
-    const closeBtn = document.getElementById('shiinah-rating-close');
+    const slider = document.getElementById('shiinah-score-slider'); const bubble = document.getElementById('shiinah-tooltip-bubble');
+    const bubbleText = document.getElementById('shiinah-bubble-text'); const bubbleNum = document.getElementById('shiinah-bubble-num');
+    const submitBtn = document.getElementById('shiinah-submit-rating'); const closeBtn = document.getElementById('shiinah-rating-close');
 
     const getRatingText = (val) => {
-        if (val >= 95) return "Masterpiece";
-        if (val >= 85) return "Great";
-        if (val >= 75) return "Very Good";
-        if (val >= 65) return "Good";
-        if (val >= 50) return "Fine";
-        if (val >= 40) return "Average";
-        if (val >= 30) return "Bad";
-        if (val >= 20) return "Very Bad";
-        if (val >= 10) return "Horrible";
-        return "Appalling";
+        if (val >= 95) return "Masterpiece"; if (val >= 85) return "Great"; if (val >= 75) return "Very Good";
+        if (val >= 65) return "Good"; if (val >= 50) return "Fine"; if (val >= 40) return "Average";
+        if (val >= 30) return "Bad"; if (val >= 20) return "Very Bad"; if (val >= 10) return "Horrible"; return "Appalling";
     };
 
     slider.addEventListener('input', (e) => {
-        const val = e.target.value;
-        slider.style.background = `linear-gradient(to right, #3db4f2 ${val}%, #2b3a4a ${val}%)`;
-        bubbleNum.textContent = val;
-        bubbleText.textContent = getRatingText(val);
-        
-        const thumbWidth = 20;
-        const percent = val / 100;
-        const pixelOffset = (thumbWidth / 2) - (thumbWidth * percent);
+        const val = e.target.value; slider.style.background = `linear-gradient(to right, #3db4f2 ${val}%, #2b3a4a ${val}%)`;
+        bubbleNum.textContent = val; bubbleText.textContent = getRatingText(val);
+        const thumbWidth = 20; const percent = val / 100; const pixelOffset = (thumbWidth / 2) - (thumbWidth * percent);
         bubble.style.left = `calc(${val}% + ${pixelOffset}px)`;
     });
 
-    // Fade Logic implementation
     let fadeTimer;
-    const triggerFadeOut = () => {
-      container.style.opacity = '1';
-      clearTimeout(fadeTimer);
-      fadeTimer = setTimeout(() => { container.style.opacity = '0.04'; }, 5000);
-    };
-
-    container.addEventListener('mousemove', triggerFadeOut);
-    container.addEventListener('mouseenter', () => {
-      container.style.opacity = '1';
-      clearTimeout(fadeTimer);
-    });
-    container.addEventListener('mouseleave', triggerFadeOut);
-    
-    // Initialize fade timer on creation
+    const triggerFadeOut = () => { container.style.opacity = '1'; clearTimeout(fadeTimer); fadeTimer = setTimeout(() => { container.style.opacity = '0.04'; }, 5000); };
+    container.addEventListener('mousemove', triggerFadeOut); container.addEventListener('mouseenter', () => { container.style.opacity = '1'; clearTimeout(fadeTimer); }); container.addEventListener('mouseleave', triggerFadeOut);
     triggerFadeOut();
 
     closeBtn.addEventListener('click', () => container.remove());
-    submitBtn.addEventListener('mouseenter', () => submitBtn.style.opacity = '0.8');
-    submitBtn.addEventListener('mouseleave', () => submitBtn.style.opacity = '1');
-
+    submitBtn.addEventListener('mouseenter', () => submitBtn.style.opacity = '0.8'); submitBtn.addEventListener('mouseleave', () => submitBtn.style.opacity = '1');
     submitBtn.addEventListener('click', () => {
-        submitBtn.textContent = 'Saving...';
-        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...'; submitBtn.disabled = true;
         chrome.runtime.sendMessage({ action: "SAVE_ANIME_SCORE", mediaId, score: parseInt(slider.value, 10) }, () => {
-            container.remove();
-            showInPageToast('success', 'Score Saved', `Your rating for ${animeName} was successfully saved!`);
+            container.remove(); showInPageToast('success', 'Score Saved', `Your rating for ${animeName} was successfully saved!`);
         });
     });
   }
@@ -1003,171 +886,36 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
       .replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
   }
 
-  // ✅ SURGICAL FIX 1: Expanded to ignore UI action buttons like 'Play Now', 'Refresh', 'All', 'Sub'
   const IGNORE_UI_WORDS = new Set([
-  // Navigation
   'home', 'browse', 'discover', 'explore', 'search', 'filter', 'filters',
   'categories', 'category', 'genres', 'genre', 'tags', 'tag',
-  'directory', 'library', 'collection',
-
-  // Sections
-  'latest', 'recent', 'recently', 'new', 'newest',
-  'popular', 'trending', 'featured', 'recommended',
-  'top', 'top rated', 'highest rated', 'most viewed',
-  'most popular', 'ongoing', 'completed', 'upcoming',
-  'airing', 'finished', 'coming soon',
-  'schedule', 'calendar', 'today', 'yesterday',
-  'this week', 'this month', 'this season', 'season',
-  'winter', 'spring', 'summer', 'fall',
-
-  // Media types
-  'tv', 'movie', 'movies', 'ova', 'ona', 'special',
-  'music', 'cm', 'pv', 'promo', 'trailer',
-
-  // Episode / Chapter UI
-  'episodes', 'episode', 'ep',
-  'chapters', 'chapter', 'ch',
-  'volumes', 'volume', 'vol',
-  'continue', 'continue watching',
-  'continue reading',
-  'start reading',
-  'start watching',
-  'watch now',
-  'read now',
-
-  // Buttons
-  'watch', 'read', 'play', 'play now',
-  'details', 'more details',
-  'read more', 'show more', 'show less',
-  'load more', 'see more', 'view more',
-  'view all', 'view', 'open',
-  'close', 'expand', 'collapse',
-  'next', 'previous', 'prev',
-  'back', 'forward',
-  'go', 'submit', 'cancel',
-  'done', 'finish', 'continue',
-
-  // Authentication
-  'login', 'log in',
-  'logout', 'log out',
-  'sign in', 'sign up',
-  'register', 'create account',
-  'forgot password',
-
-  // User
-  'profile', 'account', 'settings',
-  'preferences', 'history',
-  'watch history', 'reading history',
-  'notifications', 'notification',
-  'messages', 'favorites',
-  'favourites', 'bookmark',
-  'bookmarks', 'add to list',
-  'my list', 'list', 'lists',
-
-  // Community
-  'comments', 'comment',
-  'reviews', 'review',
-  'discussion', 'discussions',
-  'forum', 'forums',
-  'reply', 'replies',
-  'share', 'report',
-  'follow', 'unfollow',
-  'like', 'likes',
-  'favorite', 'favourite',
-  'vote', 'votes',
-
-  // Streaming
-  'sub', 'dub', 'raw',
-  'aud', 'softsub', 'hardsub',
-  'server', 'servers',
-  'stream', 'streaming',
-  'download', 'downloads',
-  'mirror', 'mirrors',
-  'quality', 'resolution',
-  'autoplay', 'autonext',
-  'skip intro', 'skip outro',
-  'fullscreen', 'pip',
-  'picture in picture',
-  'speed', 'volume',
-
-  // Status
-  'online', 'offline',
-  'available', 'unavailable',
-  'active', 'inactive',
-  'loading', 'loaded',
-  'error', 'failed',
-  'success', 'retry',
-  'refresh', 'reload',
-
-  // Search
-  'search results',
-  'no results',
-  'search...',
-  'clear',
-  'sort',
-  'sort by',
-  'ascending',
-  'descending',
-
-  // Pagination
-  'page',
-  'pages',
-  'first',
-  'last',
-  'older',
-  'newer',
-
-  // Ads / Misc
-  'advertisement',
-  'advertisements',
-  'sponsored',
-  'promo',
-  'announcement',
-  'news',
-  'events',
-
-  // Stats UI
-  'score distribution',
-  'current progress',
-  'al stats',
-  'mal stats',
-  'statistics',
-  'stats',
-  'rating',
-  'ratings',
-  'rank',
-  'ranking',
-  'popularity',
-  'favorites',
-  'members',
-  'users',
-
-  // General
-  'general',
-  'overview',
-  'summary',
-  'info',
-  'information',
-  'description',
-  'all',
-  'none',
-  'other',
-  'more',
-  'less',
-  'yes',
-  'no',
-  'ok',
-  'okay',
-
-  // Days
-  'mon', 'monday',
-  'tue', 'tuesday',
-  'wed', 'wednesday',
-  'thu', 'thursday',
-  'fri', 'friday',
-  'sat', 'saturday',
-  'sun', 'sunday'
-]);
+  'directory', 'library', 'collection', 'latest', 'recent', 'recently', 'new', 'newest',
+  'popular', 'trending', 'featured', 'recommended', 'top', 'top rated', 'highest rated', 'most viewed',
+  'most popular', 'ongoing', 'completed', 'upcoming', 'airing', 'finished', 'coming soon',
+  'schedule', 'calendar', 'today', 'yesterday', 'this week', 'this month', 'this season', 'season',
+  'winter', 'spring', 'summer', 'fall', 'tv', 'movie', 'movies', 'ova', 'ona', 'special',
+  'music', 'cm', 'pv', 'promo', 'trailer', 'episodes', 'episode', 'ep', 'chapters', 'chapter', 'ch',
+  'volumes', 'volume', 'vol', 'continue', 'continue watching', 'continue reading', 'start reading',
+  'start watching', 'watch now', 'read now', 'watch', 'read', 'play', 'play now', 'details', 'more details',
+  'read more', 'show more', 'show less', 'load more', 'see more', 'view more', 'view all', 'view', 'open',
+  'close', 'expand', 'collapse', 'next', 'previous', 'prev', 'back', 'forward', 'go', 'submit', 'cancel',
+  'done', 'finish', 'continue', 'login', 'log in', 'logout', 'log out', 'sign in', 'sign up',
+  'register', 'create account', 'forgot password', 'profile', 'account', 'settings', 'preferences', 'history',
+  'watch history', 'reading history', 'notifications', 'notification', 'messages', 'favorites', 'favourites', 'bookmark',
+  'bookmarks', 'add to list', 'my list', 'list', 'lists', 'comments', 'comment', 'reviews', 'review',
+  'discussion', 'discussions', 'forum', 'forums', 'reply', 'replies', 'share', 'report', 'follow', 'unfollow',
+  'like', 'likes', 'favorite', 'favourite', 'vote', 'votes', 'sub', 'dub', 'raw', 'aud', 'softsub', 'hardsub',
+  'server', 'servers', 'stream', 'streaming', 'download', 'downloads', 'mirror', 'mirrors', 'quality', 'resolution',
+  'autoplay', 'autonext', 'skip intro', 'skip outro', 'fullscreen', 'pip', 'picture in picture', 'speed', 'volume',
+  'online', 'offline', 'available', 'unavailable', 'active', 'inactive', 'loading', 'loaded', 'error', 'failed',
+  'success', 'retry', 'refresh', 'reload', 'search results', 'no results', 'search...', 'clear', 'sort', 'sort by',
+  'ascending', 'descending', 'page', 'pages', 'first', 'last', 'older', 'newer', 'advertisement', 'advertisements',
+  'sponsored', 'promo', 'announcement', 'news', 'events', 'score distribution', 'current progress', 'al stats',
+  'mal stats', 'statistics', 'stats', 'rating', 'ratings', 'rank', 'ranking', 'popularity', 'favorites', 'members',
+  'users', 'general', 'overview', 'summary', 'info', 'information', 'description', 'all', 'none', 'other', 'more',
+  'less', 'yes', 'no', 'ok', 'okay', 'mon', 'monday', 'tue', 'tuesday', 'wed', 'wednesday', 'thu', 'thursday',
+  'fri', 'friday', 'sat', 'saturday', 'sun', 'sunday'
+  ]);
 
   function isValidTitle(normText) {
     if (!normText || normText.length < 3) return false;
@@ -1197,7 +945,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     const h1Text = document.querySelector('h1')?.textContent || '';
     let candidate = h1Text.trim() || ogTitle.trim() || document.title || '';
     
-    // ✅ SURGICAL FIX 2: Safe stripping that won't accidentally cut out words like 'Online' in Sword Art Online
     candidate = candidate.replace(/^(?:Watch|Stream|Read)\s+/i, '')
                          .replace(/\s*(?:-?\s*(Watch Free|Online Free|English Sub|Subbed|Dubbed)).*$/i, '')
                          .replace(/\s*\|.*$/g, '')
@@ -1206,21 +953,17 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     return candidate;
   }
 
-  // ✅ SURGICAL FIX: Ultimate Context-Aware Tracking Logic
   function processAnimeCard(card, watchlist) {
     if (card.hasAttribute('data-shiinah-scanned')) return;
 
-    // 1. DEDUPLICATION (Aborts if parent or child is already tracked)
     if (card.closest('.shiinah-wrapper-marked') || card.querySelector('.shiinah-inline-badge')) {
         card.setAttribute('data-shiinah-scanned', 'true');
         return;
     }
 
-    // 2. EXCLUSIONS: Skip Cast, Staff, Characters, and generic UI buttons
     if (card.closest('.cast-grid, .characters, .staff, .comments, [class*="cast"], [class*="character"], [class*="staff"], [class*="person"]')) return;
     if (card.className && typeof card.className === 'string' && card.className.match(/cast|character|person|staff|avatar|user/i)) return;
     
-    // Explicitly allow buttons IF they label themselves as an episode
     const ariaLabel = card.getAttribute('aria-label') || '';
     const isEpisodeAria = ariaLabel.toLowerCase().includes('episode') || ariaLabel.toLowerCase().includes('chapter');
     
@@ -1230,7 +973,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     const href = (card.tagName === 'A' ? card.href : (card.querySelector('a')?.href || '')).toLowerCase();
     if (href.match(/\/(character|person|cast|staff|profile|user|comments)\//i)) return;
 
-    // 3. TEXT & TITLE EXTRACTION
     let titleEl = card.querySelector('.line-clamp-1, .line-clamp-2, a.font-semibold, h1, h2, h3, h4, h5, .title, .series-title, .anime-title, .manga-title, .card-title, p');
     if (!titleEl && card.tagName !== 'A' && card.tagName !== 'BUTTON') titleEl = card.querySelector('a[href*="/anime/"], a[href*="/series/"]');
     if (!titleEl && (card.tagName === 'A' || card.tagName === 'BUTTON')) titleEl = card;
@@ -1242,10 +984,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     const normRawText = normalizeTitle(rawText);
     const normAltText = normalizeTitle(altText);
 
-    // Kill-switch for generic UI buttons disguised as cards
     if (!imgEl && !isEpisodeAria && (normRawText === "" || IGNORE_UI_WORDS.has(normRawText))) return;
 
-    // 4. SMART CLASSIFICATION & EPISODE EXTRACTION
     const isExplicitSeriesLink = href.includes('/info/') || href.includes('/series/') || href.includes('/category/');
     const isExplicitWatchLink = href.includes('/watch') || href.includes('/episode') || href.includes('?ep=');
     const currentPath = window.location.pathname.toLowerCase();
@@ -1254,7 +994,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     let isEpisodeCard = false;
     let extractedEp = null;
 
-    // Search for numerical indicators
     const ariaEpMatch = ariaLabel.match(/\b(?:episode|ep|chapter|ch)\s*0*(\d+(\.\d+)?)\b/i);
     const urlEpMatch = href.match(/(?:[?&](?:n|ep)=|episode[/-]|ep[/-]|chapter[/-]|ch[/-]|\/episodes\/)0*(\d+(\.\d+)?)(?:[?&/#]|$)/i);
     const textEpMatch = rawText.match(/\b(?:Episode|Ep\.|Ep|Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)\b/i) || altText.match(/\b(?:Episode|Ep\.|Ep|Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)\b/i);
@@ -1272,7 +1011,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     else if (textEpMatch) extractedEp = parseFloat(textEpMatch[1]);
     else if (urlEpMatch) extractedEp = parseFloat(urlEpMatch[1]);
 
-    // Rule: It is NEVER an episode card if it links to a generic Series info page.
     if (!isExplicitSeriesLink && extractedEp !== null) {
         const inEpContainer = !!card.closest('.episodes-container, [class*="episode-list"], [class*="chapter-list"], #episodes, [class*="episodes"]');
         if (inEpContainer || isExplicitWatchLink || isEpisodeAria || /^(?:Episode|Ep|Chapter|Ch)\s*\d+(\.\d+)?$/i.test(rawText.replace(/[^\w\s]/g, '').trim())) {
@@ -1282,7 +1020,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
 
     if (!isValidTitle(normRawText) && !isValidTitle(normAltText) && extractedEp === null) return;
 
-    // 5. LOCK THE CARD
     card.setAttribute('data-shiinah-scanned', 'true');
     card.classList.add('shiinah-wrapper-marked');
     const wrapper = card.closest('li, article, .slider__item, .swiper-slide, .carousel__item');
@@ -1292,7 +1029,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     if (style.position === 'static') card.style.position = 'relative';
     card.style.overflow = 'visible'; 
 
-    // 6. MATCHING LOGIC
     let match = null;
     let displayTitle = isValidTitle(normRawText) ? rawText : (altText || document.title);
 
@@ -1304,7 +1040,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
       if (isValidTitle(normRawText)) isM = isM || isTitleMatch(normRawText, normEng) || isTitleMatch(normRawText, normRom);
       if (isValidTitle(normAltText)) isM = isM || isTitleMatch(normAltText, normEng) || isTitleMatch(normAltText, normRom);
       
-      // Rule: ONLY hijack the page title if it is strictly an Episode card AND we are not on a generic hub page.
       if (!isM && isEpisodeCard && extractedEp !== null && !isOnGenericPage) {
         const pageTitleNorm = normalizeTitle(getPageMainShowTitle());
         if (pageTitleNorm.length > 2) {
@@ -1315,7 +1050,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
       return isM;
     });
 
-    // If no match found, format the fallback title
     if (!match && isEpisodeCard && extractedEp !== null && !isOnGenericPage) {
         const pageTitle = getPageMainShowTitle();
         if (pageTitle && pageTitle.length > 2) displayTitle = pageTitle;
@@ -1345,7 +1079,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     const media = entry.media;
     const currentProgress = entry.progress || 0;
     
-    // 1. Detect if the media is Manga or Anime
     const isManga = (media && (media.format === 'MANGA' || media.format === 'NOVEL' || media.format === 'ONE_SHOT')) || 
                     (typeof getActiveMediaType === 'function' && getActiveMediaType() === 'MANGA');
     
@@ -1356,72 +1089,49 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
       latestCount = media.nextAiringEpisode.episode - 1;
     }
     
-    // 2. Evaluate status
     let isUpToDate = false;
     let badgeType = 'UNLISTED';
 
     if (isWatchlisted) {
       if (extractedEp !== null && isEpisodeCard) {
-        // Direct comparison against the chapter or episode extracted from the card
         isUpToDate = currentProgress >= extractedEp;
       } else {
-        // Fallback comparison against total count if available
         isUpToDate = (latestCount !== '?') && (currentProgress >= latestCount);
       }
       
       badgeType = isUpToDate ? 'YES' : 'NO';
     }
 
-    // 3. Assign SVG and theme color based on status
     let activeSvg, themeColor;
     if (badgeType === 'UNLISTED') { 
       activeSvg = SVG_UNLISTED; 
       themeColor = '#FFD345'; 
     } else if (badgeType === 'YES') { 
       activeSvg = SVG_YES; 
-      themeColor = '#4cca51'; // Green for Read/Watched
+      themeColor = '#4cca51'; 
     } else { 
       activeSvg = SVG_NO; 
-      themeColor = '#e74c3c'; // Red for Unread/Unwatched
+      themeColor = '#e74c3c'; 
     }
 
-    // 4. Create and inject the inline badge element
     const badgeWrapper = document.createElement('span');
     badgeWrapper.className = 'shiinah-inline-badge';
     Object.assign(badgeWrapper.style, { 
-      display: 'inline-flex', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      position: 'absolute', 
-      top: '8px', 
-      right: '8px', 
-      cursor: 'pointer', 
-      zIndex: '2147483640', 
-      flexShrink: '0' 
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', 
+      position: 'absolute', top: '8px', right: '8px', cursor: 'pointer', 
+      zIndex: '2147483640', flexShrink: '0' 
     });
     badgeWrapper.innerHTML = `<img src="${activeSvg}" style="width: 22px; height: 22px; pointer-events: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));">`;
     targetEl.appendChild(badgeWrapper);
 
-    // 5. Create tooltip container
     const tooltip = document.createElement('div');
     tooltip.className = 'shiinah-tooltip-container'; 
     tooltip._linkedBadge = badgeWrapper; 
     Object.assign(tooltip.style, { 
-      position: 'fixed', 
-      width: '290px', 
-      padding: '16px', 
-      backgroundColor: '#0b1119', 
-      border: `1px solid ${themeColor}`, 
-      borderRadius: '12px', 
-      boxShadow: '0 10px 30px rgba(0,0,0,0.9)', 
-      display: 'none', 
-      flexDirection: 'column', 
-      gap: '12px', 
-      zIndex: '2147483647', 
-      pointerEvents: 'auto', 
-      fontFamily: 'system-ui, sans-serif', 
-      color: '#fff', 
-      cursor: 'default' 
+      position: 'fixed', width: '290px', padding: '16px', backgroundColor: '#0b1119', 
+      border: `1px solid ${themeColor}`, borderRadius: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.9)', 
+      display: 'none', flexDirection: 'column', gap: '12px', zIndex: '2147483647', 
+      pointerEvents: 'auto', fontFamily: 'system-ui, sans-serif', color: '#fff', cursor: 'default' 
     });
 
     const bridge = document.createElement('div');
@@ -1430,7 +1140,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
 
     badgeWrapper.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
 
-    // 6. Build Tooltip Header HTML
     let headerHtml = '';
     if (isWatchlisted) {
       if (extractedEp !== null && isEpisodeCard) {
@@ -1675,10 +1384,12 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     tooltip.addEventListener('mouseleave', scheduleHide);
   }
 
+  // ==========================================
+  // 🏷️ SMART DOM SCANNER INITIALIZER
+  // ==========================================
   let shiinahScannerInterval = null;
   let cachedWatchlist = [];
 
-  // ✅ SURGICAL FIX: Routes the fetch through the background script to guarantee network fallback if the cache was wiped
   function initSmartTracker() {
     if (!chrome || !chrome.runtime || !chrome.runtime.id) return;
     
@@ -1697,19 +1408,17 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
     };
 
     const fetchAndBuild = (forceRedraw = false) => {
-      const pageMediaType = getActiveMediaType(); // ✅ STRICT TAB FILTERING
+      const pageMediaType = typeof getActiveMediaType === 'function' ? getActiveMediaType() : 'ANIME'; 
 
       chrome.runtime.sendMessage({ action: "GET_USER_WATCHLIST", mediaType: pageMediaType }, (response) => {
         if (chrome.runtime.lastError) return;
 
         let merged = new Map();
-        
         if (response && response.watchlist) {
           response.watchlist.forEach(entry => merged.set(entry.media.id, entry));
         }
         
         chrome.storage.local.get(['cachedList_data', 'currentMode'], (res) => {
-          // Ensure popup cache matches the tab's media type before overlaying
           if (res.cachedList_data && res.currentMode === pageMediaType) {
             res.cachedList_data.forEach(entry => merged.set(entry.media.id, entry));
           }
@@ -1732,27 +1441,6 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
         });
         
         document.querySelectorAll('.shiinah-tooltip-container').forEach(el => el.remove());
-        fetchAndBuild(true);
-      }
-    });
-
-    // Initial load
-    fetchAndBuild(true);
-    
-    chrome.storage.onChanged.addListener((changes) => {
-      if (changes.trigger_dom_refresh || changes.cachedList_data || changes.full_watchlist_cache) {
-        
-        // Safely dissolve ONLY the successfully badged wrappers to prevent scanner poisoning
-        document.querySelectorAll('.shiinah-wrapper-marked').forEach(card => {
-            card.removeAttribute('data-shiinah-scanned');
-            card.classList.remove('shiinah-wrapper-marked');
-            const badge = card.querySelector('.shiinah-inline-badge');
-            if (badge) badge.remove();
-        });
-        
-        document.querySelectorAll('.shiinah-tooltip-container').forEach(el => el.remove());
-        
-        // Fetch the newly synced lists and redraw immediately
         fetchAndBuild(true);
       }
     });

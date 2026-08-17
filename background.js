@@ -647,7 +647,8 @@ async function syncUserStatsToSupabase(userId, addedSeconds, isRetroactive = fal
   if (!isRetroactive && (!addedSeconds || addedSeconds < 5)) return null;
 
   try {
-    const storage = await chrome.storage.local.get(['anilistUsername', 'anilistAvatar', 'timeSavedSeconds']);
+    // ✅ FEATURE 3: Fetch all local settings to push to the Cloud
+    const storage = await chrome.storage.local.get(['anilistUsername', 'anilistAvatar', 'timeSavedSeconds', 'trackingThreshold', 'autoSkipEnabled', 'malToken']);
     let currentSeconds = 0;
     let unlockedTrophies = [];
     let trackingData = {};
@@ -661,6 +662,14 @@ async function syncUserStatsToSupabase(userId, addedSeconds, isRetroactive = fal
       unlockedTrophies = data[0].unlocked_achievements || [];
       trackingData = data[0].tracking_data || {};
     }
+
+    // Embed current device settings into the cloud profile
+    trackingData.cloud_settings = {
+      threshold: storage.trackingThreshold || 80,
+      autoSkip: storage.autoSkipEnabled || false,
+      linked_mal: !!storage.malToken
+    };
+
 
     const totalSeconds = currentSeconds + addedSeconds;
     const totalMinutes = totalSeconds / 60;
@@ -1529,3 +1538,87 @@ async function checkForNewEpisodes() {
     console.error("[Notifications Engine] Failed to fetch schedule:", error);
   }
 }
+// ==========================================
+// ☁️ SMART SYNC & CLOUD PREFERENCES
+// ==========================================
+
+// Fetches Cloud Settings on Startup/Login
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "FETCH_CLOUD_PREFS") {
+    (async () => {
+      try {
+        const getUrl = `${SUPABASE_URL}/rest/v1/user_stats?anilist_user_id=eq.${message.userId}&select=tracking_data`;
+        const getRes = await fetch(getUrl, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
+        const data = await getRes.json();
+        
+        if (data && data.length > 0 && data[0].tracking_data?.cloud_settings) {
+          const cloud = data[0].tracking_data.cloud_settings;
+          await chrome.storage.local.set({
+            trackingThreshold: cloud.threshold,
+            autoSkipEnabled: cloud.autoSkip,
+            cloud_mal_linked: cloud.linked_mal
+          });
+        }
+        sendResponse({ success: true });
+      } catch (e) { sendResponse({ success: false }); }
+    })();
+    return true;
+  }
+});
+
+// Runs quietly in the background to find disconnected AL/MAL progress
+async function checkListDesync() {
+  const storage = await chrome.storage.local.get(['anilistToken', 'anilistUserId', 'malToken']);
+  if (!storage.anilistToken || !storage.malToken || !storage.anilistUserId) return;
+
+  try {
+    // 1. Fetch Watching list from AniList
+    const alQuery = `query ($userId: Int) { MediaListCollection(userId: $userId, type: ANIME, status: CURRENT) { lists { entries { progress status media { id idMal title { english romaji } } } } } }`;
+    const alRes = await apiRequest(alQuery, { userId: storage.anilistUserId }, storage.anilistToken);
+    const alEntries = [];
+    alRes.data?.MediaListCollection?.lists?.forEach(l => alEntries.push(...l.entries));
+
+    // 2. Fetch Watching list from MAL
+    let malEntries = [];
+    let nextUrl = `https://api.myanimelist.net/v2/users/@me/animelist?status=watching&fields=list_status&limit=1000`;
+    while (nextUrl) {
+      const malRes = await fetch(nextUrl, { headers: { 'Authorization': `Bearer ${storage.malToken}` } });
+      const malData = await malRes.json();
+      if (malData.data) malEntries.push(...malData.data);
+      nextUrl = malData.paging?.next || null;
+    }
+    const malMap = new Map();
+    malEntries.forEach(e => malMap.set(e.node.id, e));
+
+    // 3. Compare and cache conflicts
+    const desyncCache = {};
+    alEntries.forEach(alEntry => {
+      if (alEntry.media?.idMal) {
+        const malEntry = malMap.get(alEntry.media.idMal);
+        if (malEntry) {
+          const alProg = alEntry.progress || 0;
+          const malProg = malEntry.list_status.num_episodes_watched || 0;
+          
+          if (alProg !== malProg) {
+            desyncCache[alEntry.media.id] = {
+              mediaId: alEntry.media.id,
+              malId: alEntry.media.idMal,
+              title: alEntry.media.title.english || alEntry.media.title.romaji,
+              alProgress: alProg,
+              malProgress: malProg,
+              status: alEntry.status
+            };
+          }
+        }
+      }
+    });
+
+    await chrome.storage.local.set({ desync_cache: desyncCache });
+    console.log("[Desync Checker] Scan complete. Conflicts found:", Object.keys(desyncCache).length);
+  } catch (e) { console.error("Desync Check Failed:", e); }
+}
+
+// Hook it into the 30-minute airing alarm
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "airingCheck") checkListDesync();
+});

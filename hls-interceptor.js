@@ -1,7 +1,22 @@
 // hls-interceptor.js
 // Injected into the page's MAIN world to read .m3u8 response bodies
 
-(function() {
+(function () {
+  try {
+    Object.defineProperty(document, 'visibilityState', {
+      get: () => 'visible',
+      configurable: true
+    });
+    Object.defineProperty(document, 'hidden', {
+      get: () => false,
+      configurable: true
+    });
+
+    window.addEventListener('visibilitychange', (e) => e.stopImmediatePropagation(), true);
+    window.addEventListener('blur', (e) => e.stopImmediatePropagation(), true);
+  } catch (e) {
+    // Silently catch if the host page locks document property definitions
+  }
   const originalFetch = window.fetch;
 
   // Helper function to calculate OP/ED timestamps from a playlist
