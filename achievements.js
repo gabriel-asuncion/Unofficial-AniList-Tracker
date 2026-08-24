@@ -1,6 +1,7 @@
 // achievements.js
 
-const ACHIEVEMENTS = [
+// 1. ADDED EXPORT KEYWORD HERE
+export const ACHIEVEMENTS = [
   // 🌱 EASY ACHIEVEMENTS (1-15)
   { id: "first_steps", icon: "icons/01.svg", name: "First Steps", description: "Watch your very first episode using the extension.", check: (stats) => stats.totalEpisodesTracked >= 1, progress: (stats) => [stats.totalEpisodesTracked, 1] },
   { id: "time_saver", icon: "icons/02.svg", name: "Time Saver", description: "Skip an anime intro for the first time.", check: (stats) => stats.timeSavedSeconds >= 90, progress: (stats) => [stats.timeSavedSeconds, 90] },
@@ -69,3 +70,8 @@ const ACHIEVEMENTS = [
   { id: "library_master", icon: "icons/m19.svg", name: "Library Master", description: "Finish 75 entire manga series.", check: (stats) => stats.completedManga >= 75, progress: (stats) => [stats.completedManga || 0, 75] },
   { id: "manga_god", icon: "icons/m20.svg", name: "Manga God", description: "Read 5,000 total chapters.", check: (stats) => stats.totalChaptersTracked >= 5000, progress: (stats) => [stats.totalChaptersTracked || 0, 5000] }
 ];
+
+// 2. THIS MAKES IT ACCESSIBLE TO YOUR POPUP SCRIPTS!
+if (typeof window !== 'undefined') {
+    window.ACHIEVEMENTS = ACHIEVEMENTS;
+}

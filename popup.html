@@ -126,6 +126,18 @@
         <p style="font-size: 11px; opacity: 0.7; margin: 0;">Automatically bypasses intros when exact API data is found.</p>
       </div>
 
+      <!-- ✅ NEW: UNLISTED BADGE TOGGLE -->
+      <div style="margin-bottom: 25px; padding-top: 15px; border-top: 1px solid #2b3a4a;">
+        <label style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; cursor: pointer;">
+          <span style="color: #fff; font-weight: bold; font-size: 13px;">Show 'Unlisted' Badges</span>
+          <label class="toggle-switch-container">
+            <input type="checkbox" id="unlisted-badge-toggle" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </label>
+        <p style="font-size: 11px; opacity: 0.7; margin: 0;">Display yellow DOM badges on media not in your list.</p>
+      </div>
+
       <div>
         <h4 style="margin-bottom: 10px;">Whitelisted Sites</h4>
         <div id="whitelist-manager-list" style="background-color: #0b1119; border: 1px solid #1a2636; border-radius: 6px; max-height: 150px; overflow-y: auto; padding: 5px;">
@@ -376,12 +388,14 @@
     </div>
   </div>
 
-  <!-- Link ALL of our modular scripts! -->
-  <script src="config.js"></script>
-  <script src="achievements.js"></script>
-  <script src="popup.js"></script>
-  <script src="profile.js"></script>
-  <script src="discover.js"></script>
-  <script src="settings.js"></script>
+  <!-- Modules load first -->
+  <script type="module" src="config.js"></script>
+  <script type="module" src="achievements.js"></script>
+  
+  <!-- Add 'defer' so these wait for the modules to initialize -->
+  <script src="popup.js" defer></script>
+  <script src="profile.js" defer></script>
+  <script src="discover.js" defer></script>
+  <script src="settings.js" defer></script>
 </body>
 </html>

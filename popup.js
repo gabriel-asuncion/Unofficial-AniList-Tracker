@@ -340,7 +340,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('settings-view').classList.remove('hidden');
       
       // FETCH ALL SETTINGS AND TOKENS
-      chrome.storage.local.get(['trackingThreshold', 'whitelistedDomains', 'anilistToken', 'malToken', 'autoSkipEnabled'], (res) => {
+      chrome.storage.local.get(['trackingThreshold', 'whitelistedDomains', 'anilistToken', 'malToken', 'autoSkipEnabled', 'showUnlistedBadges'], (res) => {
         // 1. Threshold Slider
         const threshold = res.trackingThreshold || 80;
         const slider = document.getElementById('threshold-slider');
@@ -350,9 +350,13 @@ document.addEventListener('DOMContentLoaded', () => {
           display.textContent = `${threshold}%`;
         }
         
-        // ✅ Load Auto-Skip State
+        // Load Auto-Skip State
         const autoSkipToggle = document.getElementById('auto-skip-toggle');
         if (autoSkipToggle) autoSkipToggle.checked = !!res.autoSkipEnabled;
+
+        // ✅ Load Unlisted Badge State (Defaults to true)
+        const unlistedToggle = document.getElementById('unlisted-badge-toggle');
+        if (unlistedToggle) unlistedToggle.checked = res.showUnlistedBadges !== false;
 
         // 2. Whitelist Manager
         renderWhitelistManager(res.whitelistedDomains || []);
@@ -425,11 +429,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ✅ NEW: Save Auto-Skip State
+  // Save Auto-Skip State
   const autoSkipToggle = document.getElementById('auto-skip-toggle');
   if (autoSkipToggle) {
     autoSkipToggle.addEventListener('change', (e) => {
       chrome.storage.local.set({ autoSkipEnabled: e.target.checked });
+    });
+  }
+
+  // ✅ NEW: Save Unlisted Badge State
+  const unlistedToggle = document.getElementById('unlisted-badge-toggle');
+  if (unlistedToggle) {
+    unlistedToggle.addEventListener('change', (e) => {
+      chrome.storage.local.set({ showUnlistedBadges: e.target.checked, trigger_dom_refresh: Date.now() });
     });
   }
 
@@ -1200,29 +1212,40 @@ function showAutoDetectView(media, progressNum, detectedType) {
       skipBtn.textContent = '⏭ Checking Fallback Tier...';
 
       // Query the active tab to get the current fallback tier from content.js
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]) {
-          chrome.tabs.sendMessage(tabs[0].id, { action: "GET_ACTIVE_SKIP_TIER" }, (res) => {
-            if (chrome.runtime.lastError || !res) {
-              skipBtn.textContent = '⏭ Skip 1:30 (Tier: Unknown)';
-              skipBtn.style.color = "#e74c3c";
-              skipBtn.style.borderColor = "#e74c3c";
-            } else {
-              skipBtn.textContent = `⏭ Skip 1:30 (${res.tierText})`;
-              
-              // Color code the button based on the active dev tier!
-              if (res.tierText.includes("Tier 1") || res.tierText.includes("Tier 2") || res.tierText.includes("Tier 3")) {
-                skipBtn.style.color = "#4cca51";
-                skipBtn.style.borderColor = "#4cca51";
-              } else {
-                // Warning color for behavioral fallback
-                skipBtn.style.color = "#E5C07B"; 
-                skipBtn.style.borderColor = "#E5C07B";
-              }
-            }
-          });
+      // popup.js
+
+chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+  if (tabs[0]) {
+    chrome.tabs.sendMessage(tabs[0].id, { action: "GET_ACTIVE_SKIP_TIER" }, (res) => {
+      // ✅ FIX: Added !res.tierText check to prevent crash if tierText is undefined
+      if (chrome.runtime.lastError || !res || !res.tierText) {
+        skipBtn.textContent = '⏭ Skip 1:30 (Tier: Unknown)';
+        skipBtn.style.color = "#e74c3c";
+        skipBtn.style.borderColor = "#e74c3c";
+      } else {
+        skipBtn.textContent = `⏭ Skip 1:30 (${res.tierText})`;
+
+        // Safely check tier string match
+        const tier = res.tierText;
+        if (
+          tier.includes("Tier 1") || 
+          tier.includes("Tier 2") || 
+          tier.includes("Tier 3") || 
+          tier.includes("AniSkip") || 
+          tier.includes("In-House") || 
+          tier.includes("HLS")
+        ) {
+          skipBtn.style.color = "#4cca51";
+          skipBtn.style.borderColor = "#4cca51";
+        } else {
+          // Warning color for behavioral or fallback tiers
+          skipBtn.style.color = "#E5C07B"; 
+          skipBtn.style.borderColor = "#E5C07B";
         }
-      });
+      }
+    });
+  }
+});
     }
   }
 }
