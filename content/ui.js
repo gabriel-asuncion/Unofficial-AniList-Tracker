@@ -1,12 +1,34 @@
 // content/ui.js
 
-const SVG_UNLISTED = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>svg { overflow: visible; }@keyframes kf_pulse_1_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_1_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_1 { transform-origin: 0 0; animation: kf_pulse_1_transform_0 2s linear infinite, kf_pulse_1_stroke_0 2s linear infinite;}@keyframes kf_pulse_2_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  10% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  30% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_2_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_2 { transform-origin: 0 0; animation: kf_pulse_2_transform_0 2s linear infinite, kf_pulse_2_stroke_0 2s linear infinite;}@keyframes kf_pulse_3_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  40% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_3_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  40% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_3 { transform-origin: 0 0; animation: kf_pulse_3_transform_0 2s linear infinite, kf_pulse_3_stroke_0 2s linear infinite;}</style><g id="watchlist_no"><circle id="pulse_1" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_2" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_3" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="bg" cx="12" cy="12" r="12" fill="#FFD345"/><path id="i" transform="translate(9 4)" d="M3.648 3.744C2.976 3.744 2.472 3.592 2.136 3.288C1.8 2.968 1.632 2.528 1.632 1.968C1.632 1.408 1.848 0.944 2.28 0.576C2.728 0.192 3.28 0 3.936 0C4.528 0 5.008 0.144 5.376 0.432C5.744 0.72 5.928 1.128 5.928 1.656C5.928 2.296 5.72 2.808 5.304 3.192C4.888 3.56 4.336 3.744 3.648 3.744ZM1.344 16.632C0.832 16.632 0.48 16.528 0.288 16.32C0.096 16.112 0 15.784 0 15.336C0 15.208 0.016 14.984 0.048 14.664C0.304 11.736 0.728 9.072 1.32 6.672C1.448 6.176 1.656 5.832 1.944 5.64C2.248 5.432 2.728 5.328 3.384 5.328C4.072 5.328 4.416 5.608 4.416 6.168C4.416 6.248 4.4 6.4 4.368 6.624C3.648 10.048 3.216 12.92 3.072 15.24C3.04 15.752 2.888 16.112 2.616 16.32C2.344 16.528 1.92 16.632 1.344 16.632Z" fill="white"/></g></svg>`)}`;
+const IGNORE_UI_WORDS = new Set([
+  'home', 'browse', 'discover', 'explore', 'search', 'filter', 'filters', 'categories', 'category', 'genres', 'genre', 'tags', 'tag',
+  'directory', 'library', 'collection', 'latest', 'recent', 'recently', 'new', 'newest', 'popular', 'trending', 'featured', 'recommended', 
+  'top', 'top rated', 'highest rated', 'most viewed', 'most popular', 'ongoing', 'completed', 'upcoming', 'airing', 'finished', 'coming soon',
+  'schedule', 'calendar', 'today', 'yesterday', 'this week', 'this month', 'this season', 'season', 'winter', 'spring', 'summer', 'fall', 
+  'tv', 'movie', 'movies', 'ova', 'ona', 'special', 'music', 'cm', 'pv', 'promo', 'trailer', 'episodes', 'episode', 'ep', 'chapters', 'chapter', 'ch',
+  'volumes', 'volume', 'vol', 'continue', 'continue watching', 'continue reading', 'start reading', 'start watching', 'watch now', 'read now', 
+  'watch', 'read', 'play', 'play now', 'details', 'more details', 'read more', 'show more', 'show less', 'load more', 'see more', 'view more', 
+  'view all', 'view', 'open', 'close', 'expand', 'collapse', 'next', 'previous', 'prev', 'back', 'forward', 'go', 'submit', 'cancel', 'done', 
+  'finish', 'continue', 'login', 'log in', 'logout', 'log out', 'sign in', 'sign up', 'register', 'create account', 'forgot password', 'profile', 'account', 
+  'settings', 'preferences', 'history', 'watch history', 'reading history', 'notifications', 'notification', 'messages', 'favorites', 'favourites', 
+  'bookmark', 'bookmarks', 'add to list', 'my list', 'list', 'lists', 'comments', 'comment', 'reviews', 'review', 'discussion', 'discussions', 
+  'forum', 'forums', 'reply', 'replies', 'share', 'report', 'follow', 'unfollow', 'like', 'likes', 'favorite', 'favourite', 'vote', 'votes', 
+  'sub', 'dub', 'raw', 'aud', 'softsub', 'hardsub', 'server', 'servers', 'stream', 'streaming', 'download', 'downloads', 'mirror', 'mirrors', 
+  'quality', 'resolution', 'autoplay', 'autonext', 'skip intro', 'skip outro', 'fullscreen', 'pip', 'picture in picture', 'speed', 'volume',
+  'online', 'offline', 'available', 'unavailable', 'active', 'inactive', 'loading', 'loaded', 'error', 'failed', 'success', 'retry', 'refresh', 
+  'reload', 'search results', 'no results', 'search...', 'clear', 'sort', 'sort by', 'ascending', 'descending', 'page', 'pages', 'first', 'last', 
+  'older', 'newer', 'advertisement', 'advertisements', 'sponsored', 'promo', 'announcement', 'news', 'events', 'score distribution', 'current progress', 
+  'al stats', 'mal stats', 'statistics', 'stats', 'rating', 'ratings', 'rank', 'ranking', 'popularity', 'favorites', 'members', 'users', 'general', 'overview', 
+  'summary', 'info', 'information', 'description', 'all', 'none', 'other', 'more', 'less', 'yes', 'no', 'ok', 'okay', 'mon', 'monday', 'tue', 'tuesday', 'wed', 'wednesday', 'thu', 'thursday', 'fri', 'friday', 'sat', 'saturday', 'sun', 'sunday'
+]);
 
-const SVG_YES = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>@keyframes kf_check_group_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  10% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-0.262rad) translate(-8px, -8px);  }  20% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0.262rad) translate(-8px, -8px);  }  30% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-0.262rad) translate(-8px, -8px);  }  40% {    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  100% {    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }}#check_group {  transform-origin: 0 0;  animation: kf_check_group_transform_0 2s linear infinite;}</style><g id="new_ok" clip-path="url(#clip0_306_964)"><circle id="outline" cx="12" cy="12" r="11.5" stroke="#4CCA51"/><circle id="fill" cx="12" cy="12" r="12" fill="#4CCA51"/><g id="check_group" transform="translate(4 4)"><rect id="left" transform="matrix(-0.707107 -0.707107 -0.707107 0.707107 7.4248 12.6567)" width="8.72559" height="2.5" rx="2" fill="white"/><rect id="right" transform="translate(4 12.6567) rotate(-45)" width="15.1949" height="2.5" rx="2" fill="white"/></g></g><defs><clipPath id="clip0_306_964"><rect width="24" height="24" fill="white"/></clipPath></defs></svg>`)}`;
+window.SVG_UNLISTED = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>svg { overflow: visible; }@keyframes kf_pulse_1_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_1_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_1 { transform-origin: 0 0; animation: kf_pulse_1_transform_0 2s linear infinite, kf_pulse_1_stroke_0 2s linear infinite;}@keyframes kf_pulse_2_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  10% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  30% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_2_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_2 { transform-origin: 0 0; animation: kf_pulse_2_transform_0 2s linear infinite, kf_pulse_2_stroke_0 2s linear infinite;}@keyframes kf_pulse_3_transform_0 {  0% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  20% { transform: translate(12px, 12px) scaleX(1) scaleY(1) translate(-12px, -12px); }  40% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }  100% { transform: translate(12px, 12px) scaleX(1.5) scaleY(1.5) translate(-12px, -12px); }}@keyframes kf_pulse_3_stroke_0 {  0% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  10.05% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #4CCA51; }  20% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  30% { animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1); stroke: #FFD345; }  40% { stroke: rgba(255, 211, 69, 0); }  100% { stroke: rgba(255, 211, 69, 0); }}#pulse_3 { transform-origin: 0 0; animation: kf_pulse_3_transform_0 2s linear infinite, kf_pulse_3_stroke_0 2s linear infinite;}</style><g id="watchlist_no"><circle id="pulse_1" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_2" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="pulse_3" cx="12" cy="12" r="11.5" stroke="#FFD345"/><circle id="bg" cx="12" cy="12" r="12" fill="#FFD345"/><path id="i" transform="translate(9 4)" d="M3.648 3.744C2.976 3.744 2.472 3.592 2.136 3.288C1.8 2.968 1.632 2.528 1.632 1.968C1.632 1.408 1.848 0.944 2.28 0.576C2.728 0.192 3.28 0 3.936 0C4.528 0 5.008 0.144 5.376 0.432C5.744 0.72 5.928 1.128 5.928 1.656C5.928 2.296 5.72 2.808 5.304 3.192C4.888 3.56 4.336 3.744 3.648 3.744ZM1.344 16.632C0.832 16.632 0.48 16.528 0.288 16.32C0.096 16.112 0 15.784 0 15.336C0 15.208 0.016 14.984 0.048 14.664C0.304 11.736 0.728 9.072 1.32 6.672C1.448 6.176 1.656 5.832 1.944 5.64C2.248 5.432 2.728 5.328 3.384 5.328C4.072 5.328 4.416 5.608 4.416 6.168C4.416 6.248 4.4 6.4 4.368 6.624C3.648 10.048 3.216 12.92 3.072 15.24C3.04 15.752 2.888 16.112 2.616 16.32C2.344 16.528 1.92 16.632 1.344 16.632Z" fill="white"/></g></svg>`)}`;
 
-const SVG_NO = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>@keyframes kf_Vector_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1) scaleY(1) translate(-6.377px, -6.377px);  }  30% {    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1.2) scaleY(1.2) translate(-6.377px, -6.377px);  }  50% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1.2) scaleY(1.2) translate(-6.377px, -6.377px);  }  60% {    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1) scaleY(1) translate(-6.377px, -6.377px);  }  100% {    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1) scaleY(1) translate(-6.377px, -6.377px);  }}#Vector {  transform-origin: 0 0;  animation: kf_Vector_transform_0 2s linear infinite;}</style><g id="new_nok" clip-path="url(#clip0_306_998)"><circle id="outline" cx="12" cy="12" r="11.5" stroke="#E74C3C"/><circle id="fill" cx="12" cy="12" r="12" fill="#E74C3C"/><g id="Vector" transform="translate(5.51777 5.49695)"><path d="M12.3869 12.3869C12.8751 11.8988 12.8751 11.1073 12.3869 10.6192L2.13388 0.366117C1.64573 -0.122039 0.854272 -0.122039 0.366116 0.366116C-0.122039 0.854272 -0.122039 1.64573 0.366117 2.13388L10.6192 12.3869C11.1073 12.8751 11.8988 12.8751 12.3869 12.3869Z" id="Vector_bg_0" fill="white"></path><path d="M0.366117 12.3869C-0.122039 11.8988 -0.122039 11.1073 0.366117 10.6192L10.6192 0.366117C11.1073 -0.122039 11.8988 -0.122039 12.3869 0.366116C12.8751 0.854272 12.8751 1.64573 12.3869 2.13388L2.13388 12.3869C1.64573 12.8751 0.854272 12.8751 0.366117 12.3869Z" fill="white"/></g></g><defs><clipPath id="clip0_306_998"><rect width="24" height="24" fill="white"/></clipPath></defs></svg>`)}`;
+window.SVG_YES = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>@keyframes kf_check_group_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  10% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-0.262rad) translate(-8px, -8px);  }  20% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0.262rad) translate(-8px, -8px);  }  30% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(-0.262rad) translate(-8px, -8px);  }  40% {    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }  100% {    transform: translateX(4px) translateY(4px) translate(8px, 8px) rotate(0rad) translate(-8px, -8px);  }}#check_group {  transform-origin: 0 0;  animation: kf_check_group_transform_0 2s linear infinite;}</style><g id="new_ok" clip-path="url(#clip0_306_964)"><circle id="outline" cx="12" cy="12" r="11.5" stroke="#4CCA51"/><circle id="fill" cx="12" cy="12" r="12" fill="#4CCA51"/><g id="check_group" transform="translate(4 4)"><rect id="left" transform="matrix(-0.707107 -0.707107 -0.707107 0.707107 7.4248 12.6567)" width="8.72559" height="2.5" rx="2" fill="white"/><rect id="right" transform="translate(4 12.6567) rotate(-45)" width="15.1949" height="2.5" rx="2" fill="white"/></g></g><defs><clipPath id="clip0_306_964"><rect width="24" height="24" fill="white"/></clipPath></defs></svg>`)}`;
 
-function mountSkipButton(activeSkip) {
+window.SVG_NO = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><style>@keyframes kf_Vector_transform_0 {  0% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1) scaleY(1) translate(-6.377px, -6.377px);  }  30% {    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1.2) scaleY(1.2) translate(-6.377px, -6.377px);  }  50% {    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1.2) scaleY(1.2) translate(-6.377px, -6.377px);  }  60% {    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1) scaleY(1) translate(-6.377px, -6.377px);  }  100% {    transform: translateX(5.518px) translateY(5.497px) translate(6.377px, 6.377px) scaleX(1) scaleY(1) translate(-6.377px, -6.377px);  }}#Vector {  transform-origin: 0 0;  animation: kf_Vector_transform_0 2s linear infinite;}</style><g id="new_nok" clip-path="url(#clip0_306_998)"><circle id="outline" cx="12" cy="12" r="11.5" stroke="#E74C3C"/><circle id="fill" cx="12" cy="12" r="12" fill="#E74C3C"/><g id="Vector" transform="translate(5.51777 5.49695)"><path d="M12.3869 12.3869C12.8751 11.8988 12.8751 11.1073 12.3869 10.6192L2.13388 0.366117C1.64573 -0.122039 0.854272 -0.122039 0.366116 0.366116C-0.122039 0.854272 -0.122039 1.64573 0.366117 2.13388L10.6192 12.3869C11.1073 12.8751 11.8988 12.8751 12.3869 12.3869Z" id="Vector_bg_0" fill="white"></path><path d="M0.366117 12.3869C-0.122039 11.8988 -0.122039 11.1073 0.366117 10.6192L10.6192 0.366117C11.1073 -0.122039 11.8988 -0.122039 12.3869 0.366116C12.8751 0.854272 12.8751 1.64573 12.3869 2.13388L2.13388 12.3869C1.64573 12.8751 0.854272 12.8751 0.366117 12.3869Z" fill="white"/></g></g><defs><clipPath id="clip0_306_998"><rect width="24" height="24" fill="white"/></clipPath></defs></svg>`)}`;
+
+window.mountSkipButton = function(activeSkip) {
   if (document.getElementById('aniskip-float-btn')) return;
   
   const btn = document.createElement('button');
@@ -37,38 +59,38 @@ function mountSkipButton(activeSkip) {
   
   btn.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation(); 
-    if (trackedVideo && activeSkip && activeSkip.interval.endTime) {
-      lastSkipTime = Date.now(); 
-      trackedVideo.currentTime = activeSkip.interval.endTime;
-      showInPageToast('success', 'Skipped', activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!');
-      unmountSkipButton();
+    if (window.trackedVideo && activeSkip && activeSkip.interval.endTime) {
+      window.lastSkipTime = Date.now(); 
+      window.trackedVideo.currentTime = activeSkip.interval.endTime;
+      window.showInPageToast('success', 'Skipped', activeSkip.skipType === 'ed' ? 'Outro skipped successfully!' : 'Intro skipped successfully!');
+      window.unmountSkipButton();
     }
   });
 
   const container = document.fullscreenElement || document.body;
   container.appendChild(btn);
-  skipButtonMounted = true;
+  window.skipButtonMounted = true;
 
-  if (skipSyncInterval) clearInterval(skipSyncInterval);
-  skipSyncInterval = setInterval(() => {
-    if (!trackedVideo) return;
+  if (window.skipSyncInterval) clearInterval(window.skipSyncInterval);
+  window.skipSyncInterval = setInterval(() => {
+    if (!window.trackedVideo) return;
     const currentContainer = document.fullscreenElement || document.body;
     if (btn.parentElement !== currentContainer) currentContainer.appendChild(btn);
     
-    const rect = trackedVideo.getBoundingClientRect();
+    const rect = window.trackedVideo.getBoundingClientRect();
     btn.style.bottom = (window.innerHeight - rect.bottom + 70) + 'px';
     btn.style.right = (window.innerWidth - rect.right + 30) + 'px';
   }, 50);
-}
+};
 
-function unmountSkipButton() {
+window.unmountSkipButton = function() {
   const btn = document.getElementById('aniskip-float-btn');
   if (btn) btn.remove();
-  if (skipSyncInterval) clearInterval(skipSyncInterval);
-  skipButtonMounted = false;
-}
+  if (window.skipSyncInterval) clearInterval(window.skipSyncInterval);
+  window.skipButtonMounted = false;
+};
 
-function mountCustomSkipButton() {
+window.mountCustomSkipButton = function() {
   if (document.getElementById('shiinah-custom-hotzone')) return;
 
   const btn = document.createElement('button');
@@ -104,49 +126,47 @@ function mountCustomSkipButton() {
 
   btn.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation(); 
-    if (!trackedVideo) return;
-    lastSkipTime = Date.now(); 
-    const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
-    const skipAmount = isOP ? (learnedSkipData.op || 85) : (learnedSkipData.ed || 85);
+    if (!window.trackedVideo) return;
     
-    const oldTime = trackedVideo.currentTime;
-    const targetTime = customBtnAppearedAt + skipAmount;
-    const finalJumpTime = Math.max(trackedVideo.currentTime + 5, targetTime); 
+    window.lastSkipTime = Date.now(); 
+    const isOP = window.trackedVideo.currentTime < (window.trackedVideo.duration * 0.5);
+    const skipAmount = isOP ? (window.learnedSkipData.op || 85) : (window.learnedSkipData.ed || 85);
     
-    trackedVideo.currentTime = finalJumpTime;
+    const oldTime = window.trackedVideo.currentTime;
+    window.trackedVideo.currentTime = oldTime + skipAmount; 
     
-    sessionSkips.push({
+    window.sessionSkips.push({
       skipType: isOP ? 'op' : 'ed',
-      interval: { startTime: oldTime, endTime: trackedVideo.currentTime }
+      interval: { startTime: oldTime, endTime: window.trackedVideo.currentTime }
     });
 
-    showInPageToast('info', 'Smart Skip', `Skipped ${skipAmount}s based on your history!`);
+    window.showInPageToast('info', 'Smart Skip', `Skipped ${skipAmount}s based on your history!`);
     btn.style.display = 'none';
-    customSkipBtnMounted = false;
-    if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
+    window.customSkipBtnMounted = false;
+    if (window.customSkipSyncInterval) clearInterval(window.customSkipSyncInterval);
   });
 
   const container = document.fullscreenElement || document.body;
   container.appendChild(btn);
-  customSkipBtnMounted = true;
+  window.customSkipBtnMounted = true;
 
-  if (customSkipSyncInterval) clearInterval(customSkipSyncInterval);
-  customSkipSyncInterval = setInterval(() => {
-    if (!trackedVideo) return;
+  if (window.customSkipSyncInterval) clearInterval(window.customSkipSyncInterval);
+  window.customSkipSyncInterval = setInterval(() => {
+    if (!window.trackedVideo) return;
     const currentContainer = document.fullscreenElement || document.body;
     if (btn.parentElement !== currentContainer) currentContainer.appendChild(btn);
     
-    const rect = trackedVideo.getBoundingClientRect();
+    const rect = window.trackedVideo.getBoundingClientRect();
     btn.style.bottom = (window.innerHeight - rect.bottom + 70) + 'px';
     btn.style.right = (window.innerWidth - rect.right + 30) + 'px';
     
-    const isOP = trackedVideo.currentTime < (trackedVideo.duration * 0.5);
-    const skipAmount = isOP ? (learnedSkipData.op || 85) : (learnedSkipData.ed || 85);
+    const isOP = window.trackedVideo.currentTime < (window.trackedVideo.duration * 0.5);
+    const skipAmount = isOP ? (window.learnedSkipData.op || 85) : (window.learnedSkipData.ed || 85);
     btn.innerHTML = isOP ? `▶ Skip Intro (+${formatTime(skipAmount)})` : `▶ Skip Outro (+${formatTime(skipAmount)})`;
   }, 50);
-}
+};
 
-function showInPageToast(type, title, description, xpData = null) {
+window.showInPageToast = function(type, title, description, xpData = null) {
   const existingToast = document.getElementById('anilist-quick-update-toast');
   if (existingToast) existingToast.remove();
 
@@ -225,9 +245,9 @@ function showInPageToast(type, title, description, xpData = null) {
 
   requestAnimationFrame(() => { setTimeout(() => { toast.style.right = '20px'; }, 100); });
   setTimeout(() => { if (container.contains(toast)) { toast.style.right = '-400px'; setTimeout(() => { if (container.contains(toast)) toast.remove(); }, 400); } }, 5000); 
-}
+};
 
-function showRatingToast(mediaId, animeName) {
+window.showRatingToast = function(mediaId, animeName) {
   const existing = document.getElementById('shiinah-rating-toast-container');
   if (existing) existing.remove();
 
@@ -301,12 +321,12 @@ function showRatingToast(mediaId, animeName) {
   submitBtn.addEventListener('click', () => {
       submitBtn.textContent = 'Saving...'; submitBtn.disabled = true;
       chrome.runtime.sendMessage({ action: "SAVE_ANIME_SCORE", mediaId, score: parseInt(slider.value, 10) }, () => {
-          container.remove(); showInPageToast('success', 'Score Saved', `Your rating for ${animeName} was successfully saved!`);
+          container.remove(); window.showInPageToast('success', 'Score Saved', `Your rating for ${animeName} was successfully saved!`);
       });
   });
-}
+};
 
-function formatStatusLabel(status) {
+window.formatStatusLabel = function(status) {
   if (!status) return 'UNKNOWN';
   switch(status.toUpperCase()) {
     case 'RELEASING': return 'Releasing';
@@ -316,14 +336,14 @@ function formatStatusLabel(status) {
     case 'NOT_YET_RELEASED': return 'Not Yet Released';
     default: return status;
   }
-}
+};
 
-function injectInteractiveBadge(targetEl, entry, isWatchlisted, rawText, extractedEp = null, isEpisodeCard = false) {
+window.injectInteractiveBadge = function(targetEl, entry, isWatchlisted, rawText, extractedEp = null, isEpisodeCard = false) {
   const media = entry.media;
   const currentProgress = entry.progress || 0;
   
   const isManga = (media && (media.format === 'MANGA' || media.format === 'NOVEL' || media.format === 'ONE_SHOT')) || 
-                  (typeof getActiveMediaType === 'function' && getActiveMediaType() === 'MANGA');
+                  (typeof window.getActiveMediaType === 'function' && window.getActiveMediaType() === 'MANGA');
   
   const unitLabel = isManga ? 'Ch' : 'Ep';
 
@@ -347,15 +367,15 @@ function injectInteractiveBadge(targetEl, entry, isWatchlisted, rawText, extract
 
   let activeSvg, themeColor;
   if (badgeType === 'UNLISTED') { 
-    if (!showUnlistedBadges) return; 
+    if (!window.showUnlistedBadges) return; 
     
-    activeSvg = SVG_UNLISTED; 
+    activeSvg = window.SVG_UNLISTED; 
     themeColor = '#FFD345'; 
   } else if (badgeType === 'YES') { 
-    activeSvg = SVG_YES; 
+    activeSvg = window.SVG_YES; 
     themeColor = '#4cca51'; 
   } else { 
-    activeSvg = SVG_NO; 
+    activeSvg = window.SVG_NO; 
     themeColor = '#e74c3c'; 
   }
 
@@ -445,7 +465,7 @@ function injectInteractiveBadge(targetEl, entry, isWatchlisted, rawText, extract
 
     if (cachedStats?.meta?.status) {
       const statusEl = tooltip.querySelector('.shiinah-media-status');
-      if (statusEl) statusEl.textContent = `Status: ${formatStatusLabel(cachedStats.meta.status)}`;
+      if (statusEl) statusEl.textContent = `Status: ${window.formatStatusLabel(cachedStats.meta.status)}`;
     }
 
     const activeData = cachedStats?.al;
@@ -501,7 +521,7 @@ function injectInteractiveBadge(targetEl, entry, isWatchlisted, rawText, extract
       fetchIntentTimeout = setTimeout(async () => {
         try {
           if (!chrome.runtime?.id) return;
-          const pageMediaType = typeof getActiveMediaType === 'function' ? getActiveMediaType() : (isManga ? 'MANGA' : 'ANIME');
+          const pageMediaType = typeof window.getActiveMediaType === 'function' ? window.getActiveMediaType() : (isManga ? 'MANGA' : 'ANIME');
           
           if (isWatchlisted) {
             chrome.runtime.sendMessage({ action: "FETCH_MEDIA_STATS", mediaId: media.id, malId: media.idMal, mediaType: pageMediaType }, (res) => {
@@ -627,9 +647,9 @@ function injectInteractiveBadge(targetEl, entry, isWatchlisted, rawText, extract
   badgeWrapper.addEventListener('mouseleave', scheduleHide);
   tooltip.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
   tooltip.addEventListener('mouseleave', scheduleHide);
-}
+};
 
-function processAnimeCard(card, watchlist) {
+window.processAnimeCard = function(card, watchlist) {
   if (card.hasAttribute('data-shiinah-scanned')) return;
 
   if (card.closest('.shiinah-wrapper-marked') || card.querySelector('.shiinah-inline-badge')) {
@@ -657,8 +677,8 @@ function processAnimeCard(card, watchlist) {
   const imgEl = card.querySelector('img, picture');
   const altText = imgEl ? (imgEl.getAttribute('alt') || '').trim() : '';
 
-  const normRawText = normalizeTitle(rawText);
-  const normAltText = normalizeTitle(altText);
+  const normRawText = window.normalizeTitle(rawText);
+  const normAltText = window.normalizeTitle(altText);
 
   if (!imgEl && !isEpisodeAria && (normRawText === "" || IGNORE_UI_WORDS.has(normRawText))) return;
 
@@ -694,7 +714,7 @@ function processAnimeCard(card, watchlist) {
       }
   }
 
-  if (!isValidTitle(normRawText) && !isValidTitle(normAltText) && extractedEp === null) return;
+  if (!window.isValidTitle(normRawText) && !window.isValidTitle(normAltText) && extractedEp === null) return;
 
   card.setAttribute('data-shiinah-scanned', 'true');
   card.classList.add('shiinah-wrapper-marked');
@@ -706,20 +726,20 @@ function processAnimeCard(card, watchlist) {
   card.style.overflow = 'visible'; 
 
   let match = null;
-  let displayTitle = isValidTitle(normRawText) ? rawText : (altText || document.title);
+  let displayTitle = window.isValidTitle(normRawText) ? rawText : (altText || document.title);
 
   match = watchlist.find(entry => {
-    const normEng = normalizeTitle(entry.media?.title?.english);
-    const normRom = normalizeTitle(entry.media?.title?.romaji);
+    const normEng = window.normalizeTitle(entry.media?.title?.english);
+    const normRom = window.normalizeTitle(entry.media?.title?.romaji);
     let isM = false;
     
-    if (isValidTitle(normRawText)) isM = isM || isTitleMatch(normRawText, normEng) || isTitleMatch(normRawText, normRom);
-    if (isValidTitle(normAltText)) isM = isM || isTitleMatch(normAltText, normEng) || isTitleMatch(normAltText, normRom);
+    if (window.isValidTitle(normRawText)) isM = isM || window.isTitleMatch(normRawText, normEng) || window.isTitleMatch(normRawText, normRom);
+    if (window.isValidTitle(normAltText)) isM = isM || window.isTitleMatch(normAltText, normEng) || window.isTitleMatch(normAltText, normRom);
     
     if (!isM && isEpisodeCard && extractedEp !== null && !isOnGenericPage) {
-      const pageTitleNorm = normalizeTitle(getPageMainShowTitle());
+      const pageTitleNorm = window.normalizeTitle(window.getPageMainShowTitle());
       if (pageTitleNorm.length > 2) {
-        isM = isPageTitleMatch(pageTitleNorm, normEng) || isPageTitleMatch(pageTitleNorm, normRom);
+        isM = window.isPageTitleMatch(pageTitleNorm, normEng) || window.isPageTitleMatch(pageTitleNorm, normRom);
         if (isM) displayTitle = entry.media.title.romaji; 
       }
     }
@@ -727,14 +747,101 @@ function processAnimeCard(card, watchlist) {
   });
 
   if (!match && isEpisodeCard && extractedEp !== null && !isOnGenericPage) {
-      const pageTitle = getPageMainShowTitle();
+      const pageTitle = window.getPageMainShowTitle();
       if (pageTitle && pageTitle.length > 2) displayTitle = pageTitle;
   }
   if (!displayTitle) displayTitle = "Unknown Series";
 
   if (match) {
-    injectInteractiveBadge(card, match, true, displayTitle, extractedEp, isEpisodeCard);
+    window.injectInteractiveBadge(card, match, true, displayTitle, extractedEp, isEpisodeCard);
   } else {
-    injectInteractiveBadge(card, { media: { title: { romaji: displayTitle } } }, false, displayTitle, extractedEp, isEpisodeCard);
+    window.injectInteractiveBadge(card, { media: { title: { romaji: displayTitle } } }, false, displayTitle, extractedEp, isEpisodeCard);
   }
-}
+};
+
+window.isValidTitle = function(normText) {
+  if (!normText || normText.length < 3) return false;
+  return !IGNORE_UI_WORDS.has(normText);
+};
+
+window.showSkipWarningToast = function(missingEps, currentEp, mediaId, malId, targetProgress) {
+  const existingToast = document.getElementById('shiinah-skip-warning-toast');
+  if (existingToast) existingToast.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'shiinah-skip-warning-toast';
+  
+  Object.assign(toast.style, {
+    position: 'fixed', top: '20px', right: '-400px', opacity: '0',
+    backgroundColor: '#1f1f1f', color: '#ffffff', border: '1px solid #333', padding: '16px',
+    borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.6)', zIndex: '2147483647',
+    fontFamily: 'system-ui, -apple-system, sans-serif', display: 'flex', flexDirection: 'column',
+    width: '340px', transition: 'right 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s ease', boxSizing: 'border-box'
+  });
+
+  const formatMissing = missingEps.length > 3 ? `${missingEps[0]}...${missingEps[missingEps.length-1]}` : missingEps.join(', ');
+
+  toast.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <svg fill="#f39c12" viewBox="0 0 24 24" width="22" height="22"><path d="M12 2L1 21h22L12 2zm-1 14v-4h2v4h-2zm0 4v-2h2v2h-2z"/></svg>
+        <span style="font-size: 15px; font-weight: 600; color: #fff;">Episode Gap Detected</span>
+      </div>
+      <button id="skip-warning-close" style="background: transparent; border: none; color: #aaa; cursor: pointer; font-size: 16px; padding: 0; line-height: 1; transition: 0.2s;">✕</button>
+    </div>
+    <div style="font-size: 13px; color: #aaa; margin-bottom: 16px; line-height: 1.4; padding-left: 32px;">
+      You skipped episode(s): <b style="color: #fff;">${formatMissing}</b><br>
+      Currently at: <b style="color: #3db4f2;">Episode ${currentEp}</b>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button id="skip-warning-back-btn" style="background: transparent; color: #aaa; border: 1px solid #444; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s;">Go Back</button>
+      <button id="skip-warning-mark-btn" style="background: #3db4f2; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s;">Mark as Done</button>
+    </div>
+  `;
+
+  const container = document.fullscreenElement || document.body;
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.style.right = '20px';
+    toast.style.opacity = '1';
+  });
+
+  if (window.trackedVideo && !window.trackedVideo.paused) {
+      window.trackedVideo.pause();
+  }
+
+  const closeToast = () => {
+    toast.style.right = '-400px';
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 400);
+  };
+
+  document.getElementById('skip-warning-close').addEventListener('click', closeToast);
+  document.getElementById('skip-warning-close').addEventListener('mouseenter', (e) => e.target.style.color = '#fff');
+  document.getElementById('skip-warning-close').addEventListener('mouseleave', (e) => e.target.style.color = '#aaa');
+
+  const markBtn = document.getElementById('skip-warning-mark-btn');
+  markBtn.addEventListener('click', (e) => {
+    e.target.textContent = 'Updating...';
+    e.target.disabled = true;
+    chrome.runtime.sendMessage({ action: "MARK_GAP_AS_DONE", mediaId, malId, targetProgress }, (res) => {
+      e.target.textContent = 'Updated! ✓';
+      e.target.style.background = '#4cca51';
+      setTimeout(() => {
+        if (window.trackedVideo) window.trackedVideo.play();
+        closeToast();
+      }, 1000);
+    });
+  });
+  markBtn.addEventListener('mouseenter', (e) => { if(!e.target.disabled) e.target.style.background = '#2c9ad1'; });
+  markBtn.addEventListener('mouseleave', (e) => { if(!e.target.disabled) e.target.style.background = '#3db4f2'; });
+
+  const backBtn = document.getElementById('skip-warning-back-btn');
+  backBtn.addEventListener('click', () => {
+    if (window.history.length > 1) window.history.back();
+    else window.close();
+  });
+  backBtn.addEventListener('mouseenter', (e) => { e.target.style.color = '#fff'; e.target.style.borderColor = '#aaa'; });
+  backBtn.addEventListener('mouseleave', (e) => { e.target.style.color = '#aaa'; e.target.style.borderColor = '#444'; });
+};

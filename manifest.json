@@ -26,12 +26,6 @@
     "notifications",
     "alarms" 
   ],
-  "web_accessible_resources": [
-    {
-      "resources": ["hls-interceptor.js"],
-      "matches": ["<all_urls>"]
-    }
-  ],
   "host_permissions": [
     "https://graphql.anilist.co/*",
     "https://api.aniskip.com/*",

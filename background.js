@@ -270,27 +270,141 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
     return false;
   }
+  else if (message.action === "REBIND_MEDIA_ID") {
+    chrome.storage.local.get(['anilistToken', 'anilistUserId'], async (res) => {
+      try {
+        let newMedia = null;
+        if (message.targetType === 'AL') {
+          const query = `query($id: Int) { Media(id: $id, type: ${message.mediaType}) { id idMal status title { romaji english } coverImage { medium large } episodes chapters mediaListEntry { progress status } } }`;
+          const apiRes = await apiRequest(query, { id: message.targetId }, res.anilistToken);
+          newMedia = apiRes.data?.Media;
+        }
+        if (newMedia) {
+          if (res.anilistUserId) {
+            await deleteOtgTimeFromSupabase(res.anilistUserId, message.oldMediaId, message.progress);
+            await saveOtgTimeToSupabase(res.anilistUserId, newMedia.id, message.progress, 0, null, null, 'ANILIST');
+          }
+          chrome.storage.local.remove([`full_watchlist_cache_${message.mediaType}`, 'cachedList_data']);
+          chrome.storage.local.set({ trigger_dom_refresh: Date.now() });
+          sendResponse({ success: true, media: newMedia });
+        } else {
+          sendResponse({ success: false });
+        }
+      } catch(e) { sendResponse({ success: false }); }
+    });
+    return true;
+  }
+  else if (message.action === "MARK_AS_UNLISTED") {
+    chrome.storage.local.get(['anilistUserId'], async (res) => {
+      try {
+        const negId = hashStringToNegativeInt(message.title);
+        if (res.anilistUserId) {
+          await deleteOtgTimeFromSupabase(res.anilistUserId, message.oldMediaId, message.progress);
+          await saveOtgTimeToSupabase(res.anilistUserId, negId, message.progress, 0, null, message.title, 'CUSTOM');
+        }
+        chrome.storage.local.remove([`full_watchlist_cache_${message.mediaType}`, 'cachedList_data']);
+        chrome.storage.local.set({ trigger_dom_refresh: Date.now() });
+        sendResponse({ success: true, newId: negId });
+      } catch(e) { sendResponse({ success: false }); }
+    });
+    return true;
+  }
+  
+  // ✅ REWRITTEN: Episode-Specific Save Logic
   else if (message.action === "SAVE_LEARNED_SKIP") {
     chrome.storage.local.get(['learnedSkips'], (res) => {
       let skips = res.learnedSkips || {};
       if (!skips[message.mediaId]) skips[message.mediaId] = { op: [], ed: [] };
-      if (message.isOP) skips[message.mediaId].op.push(message.duration);
-      else skips[message.mediaId].ed.push(message.duration);
+      
+      const targetList = message.isOP ? skips[message.mediaId].op : skips[message.mediaId].ed;
+      const existingIdx = targetList.findIndex(s => s.ep === message.episode);
+      if (existingIdx > -1) targetList[existingIdx].duration = message.duration;
+      else targetList.push({ ep: message.episode, duration: message.duration });
+      
       chrome.storage.local.set({ learnedSkips: skips });
     });
     return false;
   }
+
+  // ✅ REWRITTEN: Sliding Window Cour Logic
   else if (message.action === "GET_LEARNED_SKIP") {
     chrome.storage.local.get(['learnedSkips'], (res) => {
       let skips = res.learnedSkips || {};
       let data = skips[message.mediaId];
       if (!data) return sendResponse({ op: 85, ed: 85 }); 
-      let avgOp = data.op.length ? Math.round(data.op.reduce((a,b)=>a+b,0)/data.op.length) : 85;
-      let avgEd = data.ed.length ? Math.round(data.ed.reduce((a,b)=>a+b,0)/data.ed.length) : 85;
-      sendResponse({ op: avgOp - 1, ed: avgEd - 1 }); 
+
+      const getBestDuration = (list, targetEp) => {
+         if (!list || list.length === 0) return 85;
+         const courStart = Math.floor((targetEp - 1) / 13) * 13 + 1;
+         const courEnd = courStart + 12;
+         let relevant = list.filter(s => s.ep >= courStart && s.ep <= courEnd);
+         
+         if (relevant.length === 0) {
+           const before = list.filter(s => s.ep <= targetEp).sort((a,b) => b.ep - a.ep);
+           if (before.length > 0) return Math.round(before[0].duration);
+           return 85;
+         }
+         
+         const counts = {};
+         let maxCount = 0, bestDur = 85;
+         relevant.forEach(s => {
+            const d = Math.round(s.duration);
+            counts[d] = (counts[d] || 0) + 1;
+            if (counts[d] > maxCount) { maxCount = counts[d]; bestDur = d; }
+         });
+         return bestDur;
+      };
+
+      sendResponse({ op: getBestDuration(data.op, message.episode), ed: getBestDuration(data.ed, message.episode) }); 
     });
     return true; 
   }
+
+  // ✅ NEW: Missing Episode Gap Detector
+  else if (message.action === "CHECK_EPISODE_GAP") {
+    chrome.storage.local.get(['anilistToken'], async (res) => {
+      if (!res.anilistToken) return sendResponse({ hasGap: false });
+      try {
+        const query = `query($id: Int) { Media(id: $id) { mediaListEntry { progress status } } }`;
+        const apiRes = await apiRequest(query, { id: message.mediaId }, res.anilistToken);
+        const entry = apiRes.data?.Media?.mediaListEntry;
+        
+        if (entry?.status === 'COMPLETED') return sendResponse({ hasGap: false });
+
+        const progress = entry?.progress || 0;
+        const currentEp = Math.floor(message.episode);
+
+        if (currentEp > progress + 1) {
+          let missingEps = [];
+          for (let i = progress + 1; i < currentEp; i++) {
+            missingEps.push(i);
+          }
+          sendResponse({ hasGap: true, missingEps: missingEps, targetProgress: currentEp - 1 });
+        } else {
+          sendResponse({ hasGap: false });
+        }
+      } catch (e) { sendResponse({ hasGap: false }); }
+    });
+    return true;
+  }
+  
+  // ✅ NEW: Gap Resolver Action
+  else if (message.action === "MARK_GAP_AS_DONE") {
+    chrome.storage.local.get(['anilistToken', 'malToken'], async (res) => {
+      if (res.anilistToken) {
+        const mutation = `mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) { SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status) { id } }`;
+        try { await apiRequest(mutation, { mediaId: message.mediaId, progress: message.targetProgress, status: 'CURRENT' }, res.anilistToken); } catch(e) {}
+      }
+      if (res.malToken && message.malId) {
+         try { await updateMalProgress(message.malId, message.targetProgress, 'CURRENT', 'ANIME', res.malToken); } catch(e) {}
+      }
+      chrome.storage.local.remove(['full_watchlist_cache_ANIME']);
+      chrome.storage.local.set({ trigger_dom_refresh: Date.now() });
+      sendResponse({ success: true });
+    });
+    return true;
+  }
+
   else if (message.action === "FETCH_ANISKIP") {
     fetch(`https://api.aniskip.com/v2/skip-times/${message.malId}/${message.episode}?types=op&types=ed&episodeLength=0`)
       .then(res => res.json()).then(data => sendResponse(data)).catch(err => sendResponse({ found: false }));

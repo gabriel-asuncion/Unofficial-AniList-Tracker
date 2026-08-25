@@ -1,8 +1,6 @@
 // popup.js
-// CORE LOGIC: Auth, API Routing, Anime List Rendering, and Auto-Detect
-
-const CLIENT_ID = ANILIST_CLIENT_ID; 
-const SECOND_CLIENT_ID = MAL_CLIENT_ID;
+const CLIENT_ID = window.ANILIST_CLIENT_ID || '45996'; 
+const SECOND_CLIENT_ID = window.MAL_CLIENT_ID || '5f2a8c1ef34ae37bbc72eaf847bc52e3';
 let accessToken = null;
 let userId = null;
 let currentSelectedAnime = null; 
@@ -12,36 +10,51 @@ let currentDayTabIndex = new Date().getDay();
 let currentFilter = 'SCHEDULE'; 
 const debounceTimers = {}; 
 let currentThreshold = 80;
-
 let currentMode = 'ANIME';
-
-// Auto-detect variables
 let detectedMedia = null;
 let detectedEpisode = null;
 let hiddenMediaIds = [];
 
+// ✅ NEW: Centralized View Router
+window.showAppView = function(targetViewId, showSearch = false) {
+  const views = [
+    'main-view', 'settings-view', 'detail-view', 'profile-view',
+    'leaderboard-view', 'recommendation-view', 'autodetect-view', 'whitelist-view'
+  ];
+  
+  // Hide all views, show only the target
+  views.forEach(viewId => {
+    const el = document.getElementById(viewId);
+    if (el) {
+      if (viewId === targetViewId) el.classList.remove('hidden');
+      else el.classList.add('hidden');
+    }
+  });
 
+  // Handle global search input
+  const searchInput = document.getElementById('search-input');
+  if (searchInput) {
+    if (showSearch) searchInput.classList.remove('hidden');
+    else searchInput.classList.add('hidden');
+  }
+};
 
 document.addEventListener('DOMContentLoaded', () => {
-  // 1. INITIAL BOOT: Load token, threshold, mode, and hidden titles
   chrome.storage.local.get(['anilistToken', 'trackingThreshold', 'currentMode'], (localRes) => {
     chrome.storage.sync.get(['hiddenMediaIds'], (syncRes) => {
-      
-      chrome.storage.local.remove('ignoredDomains'); // ✅ SURGICAL FIX 1: Nuke broken legacy cache
+      chrome.storage.local.remove('ignoredDomains'); 
 
       if (localRes.trackingThreshold) currentThreshold = localRes.trackingThreshold;
       if (syncRes.hiddenMediaIds) hiddenMediaIds = syncRes.hiddenMediaIds;
-      
-      // NEW: Load saved mode and update the button icon
       if (localRes.currentMode) currentMode = localRes.currentMode;
-      const modeBtn = document.getElementById('mode-toggle-btn');
-      if (modeBtn) modeBtn.textContent = currentMode === 'ANIME' ? '📺' : '📖';
       
-      // --- FIX: SET INITIAL FILTER & UI LABEL BASED ON SAVED MODE ---
+      const modeIcon = document.getElementById('mode-icon');
+      if (modeIcon) modeIcon.src = currentMode === 'ANIME' ? 'icons/monitor.svg' : 'icons/book-open.svg';
+      
       currentFilter = currentMode === 'ANIME' ? 'SCHEDULE' : 'CURRENT';
       const viewLabel = document.getElementById('current-view-label');
       if (viewLabel) viewLabel.textContent = currentMode === 'ANIME' ? 'Schedule (My List) ▾' : 'Currently Reading ▾';
-      // --------------------------------------------------------------
+      
       updateDropdownMenu();
       if (localRes.anilistToken) {
         accessToken = localRes.anilistToken;
@@ -53,23 +66,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // --- CORE UI LISTENERS ---
   document.getElementById('login-btn').addEventListener('click', handleLoginClick);
   document.getElementById('logout-btn').addEventListener('click', handleLogoutClick);
   
-  // Attach MAL login to the main login screen button
   const malLoginBtn = document.getElementById('mal-login-btn');
   if (malLoginBtn) malLoginBtn.addEventListener('click', handleMalLoginClick);
 
-  // Attach auth flows to the Settings Menu link buttons
   const settingsAniBtn = document.getElementById('settings-anilist-link-btn');
   if (settingsAniBtn) settingsAniBtn.addEventListener('click', handleLoginClick);
   
   const settingsMalBtn = document.getElementById('settings-mal-link-btn');
   if (settingsMalBtn) settingsMalBtn.addEventListener('click', handleMalLoginClick);
   
-  // --- NEW: REACTIVE UI LISTENER ---
-  // This listens for the background script saving the token and updates the UI instantly
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local' && changes.malToken && changes.malToken.newValue) {
       const btn = document.getElementById('settings-mal-link-btn');
@@ -82,7 +90,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-// --- NEW: SMART MERGE LISTENER ---
   const syncShiinahBtn = document.getElementById('sync-shiinah-btn');
   if (syncShiinahBtn) {
     syncShiinahBtn.addEventListener('click', () => {
@@ -98,28 +105,19 @@ document.addEventListener('DOMContentLoaded', () => {
         statusText.style.color = '#3db4f2';
         statusText.textContent = "Fetching and comparing libraries...";
       }
-      
       chrome.runtime.sendMessage({ action: "SYNC_SMART_MERGE" });
     });
   }
 
-  // Listen for Live Sync Progress
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === "SYNC_PROGRESS") {
       const progressBar = document.getElementById('sync-progress-bar');
       const statusText = document.getElementById('sync-status-text');
-      
-      if (progressBar) {
-        const pct = (message.current / message.total) * 100;
-        progressBar.style.width = `${pct}%`;
-      }
-      if (statusText) {
-        statusText.textContent = `Syncing: ${message.current} / ${message.total} (${message.title})`;
-      }
+      if (progressBar) progressBar.style.width = `${(message.current / message.total) * 100}%`;
+      if (statusText) statusText.textContent = `Syncing: ${message.current} / ${message.total} (${message.title})`;
     } else if (message.action === "SYNC_COMPLETE") {
       const statusText = document.getElementById('sync-status-text');
       const syncBtn = document.getElementById('sync-shiinah-btn');
-      
       if (statusText) {
         statusText.textContent = `✅ Sync Complete! ${message.updatesMade} updates made.`;
         statusText.style.color = "#4cca51";
@@ -131,24 +129,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  const syncMalToAniBtn = document.getElementById('sync-mal-to-ani-btn');
-  if (syncMalToAniBtn) {
-    syncMalToAniBtn.addEventListener('click', () => {
-      const statusText = document.getElementById('sync-status-text');
-      syncMalToAniBtn.disabled = true;
-      syncMalToAniBtn.textContent = "Syncing...";
-      if (statusText) statusText.textContent = "Fetching lists & comparing data...";
-      
-      chrome.runtime.sendMessage({ action: "SYNC_MAL_TO_ANI" });
-    });
-  }
-
-  document.getElementById('back-btn').addEventListener('click', () => {
-    document.getElementById('detail-view').classList.add('hidden');
-    document.getElementById('main-view').classList.remove('hidden');
+  // Global Back Buttons using the Router
+  document.getElementById('back-btn')?.addEventListener('click', () => {
+    window.showAppView('main-view', true);
+  });
+  document.getElementById('leaderboard-back-btn')?.addEventListener('click', () => {
+    window.showAppView('main-view', true);
+  });
+  document.getElementById('profile-back-btn')?.addEventListener('click', () => {
+    window.showAppView('main-view', true);
   });
 
-  // --- DYNAMIC DROPDOWN GENERATOR ---
   function updateDropdownMenu() {
     const dropdown = document.getElementById('filter-dropdown');
     if (!dropdown) return;
@@ -172,8 +163,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="filter-option" data-value="LEADERBOARD" style="border-top: 1px solid #2b3a4a; color: #E5C07B;">Global Leaderboard</div>
       `;
     }
-    
-    // Event delegation is now handled by a single listener on the dropdown container
   }
 
   const filterDropdown = document.getElementById('filter-dropdown');
@@ -181,25 +170,18 @@ document.addEventListener('DOMContentLoaded', () => {
     filterDropdown.addEventListener('click', (e) => {
       const target = e.target.closest('.filter-option');
       if (!target) return;
-
       currentFilter = target.dataset.value;
       document.getElementById('current-view-label').textContent = target.textContent + ' ▾';
       filterDropdown.classList.add('hidden');
       document.getElementById('search-input').value = '';
 
       if (currentFilter === 'LEADERBOARD') {
-        document.getElementById('main-view').classList.add('hidden');
-        document.getElementById('search-input').classList.add('hidden');
-        document.getElementById('profile-view').classList.add('hidden');
-        document.getElementById('leaderboard-view').classList.remove('hidden');
+        window.showAppView('leaderboard-view', false);
         if (typeof loadLeaderboard === 'function') loadLeaderboard();
       } else if (currentFilter === 'UNFINISHED') {
-        document.getElementById('leaderboard-view').classList.add('hidden');
-        document.getElementById('profile-view').classList.add('hidden');
-        document.getElementById('main-view').classList.remove('hidden');
+        window.showAppView('main-view', true);
         document.getElementById('day-tabs').classList.add('hidden');
-        document.getElementById('search-input').classList.remove('hidden');
-        loadUnfinishedList();
+        if (typeof loadUnfinishedList === 'function') loadUnfinishedList();
       } else if (accessToken) {
         loadAnimeList();
       }
@@ -209,13 +191,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const modeBtn = document.getElementById('mode-toggle-btn');
   if (modeBtn) {
     updateDropdownMenu();
-
     modeBtn.addEventListener('click', () => {
       currentMode = currentMode === 'ANIME' ? 'MANGA' : 'ANIME';
       
-      modeBtn.textContent = currentMode === 'ANIME' ? '📺' : '📖';
-      chrome.storage.local.set({ currentMode: currentMode });
+      const modeIcon = document.getElementById('mode-icon');
+      if (modeIcon) modeIcon.src = currentMode === 'ANIME' ? 'icons/monitor.svg' : 'icons/book-open.svg';
       
+      chrome.storage.local.set({ currentMode: currentMode });
       currentFilter = currentMode === 'ANIME' ? 'SCHEDULE' : 'CURRENT';
       const viewLabel = document.getElementById('current-view-label');
       if (viewLabel) viewLabel.textContent = currentMode === 'ANIME' ? 'Schedule (My List) ▾' : 'Currently Reading ▾';
@@ -224,26 +206,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const searchInput = document.getElementById('search-input');
       if (searchInput) searchInput.value = ''; 
       
-      // --- NEW: CONTEXT-AWARE REFRESH LOGIC ---
       const profileView = document.getElementById('profile-view');
-      
-      // Check if the user is currently looking at their profile
       if (profileView && !profileView.classList.contains('hidden')) {
         if (typeof userId !== 'undefined' && userId) {
-          // Refresh the detailed stats dynamically
           if (typeof loadDetailedStats === 'function') loadDetailedStats(userId);
-          
-          // Hide/Show the "Time Saved" element based on the mode
           const timeSavedEl = document.getElementById('time-saved-display');
           if (timeSavedEl && timeSavedEl.parentElement) {
             timeSavedEl.parentElement.style.display = currentMode === 'ANIME' ? 'block' : 'none';
           }
         }
       } else if (accessToken) {
-        // If they are on the main dashboard, reload the list normally
-        if (typeof loadAnimeList === 'function') loadAnimeList();
+        loadAnimeList();
       }
-      // ----------------------------------------
     });
   }
 
@@ -272,13 +246,11 @@ document.addEventListener('DOMContentLoaded', () => {
     hideToggle.addEventListener('change', (e) => {
       if (!currentSelectedAnime) return;
       const id = currentSelectedAnime.media.id;
-      
       if (e.target.checked) {
         if (!hiddenMediaIds.includes(id)) hiddenMediaIds.push(id);
       } else {
         hiddenMediaIds = hiddenMediaIds.filter(hid => hid !== id);
       }
-      
       chrome.storage.sync.set({ hiddenMediaIds: hiddenMediaIds });
     });
   }
@@ -292,119 +264,79 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- TIME WIZARD / SKIP LOGIC ---
   const skipBtn = document.getElementById('skip-intro-btn');
   if (skipBtn) {
     skipBtn.addEventListener('click', () => {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
-          // ✅ Send SMART_SKIP instead of a hardcoded 90
           chrome.tabs.sendMessage(tabs[0].id, { action: "SMART_SKIP" });
-          
           chrome.storage.local.get(['timeSavedSeconds', 'lastSkipTimestamp'], (res) => {
             const now = Date.now();
             const lastSkip = res.lastSkipTimestamp || 0;
-            
             if (now - lastSkip < 60000) {
               const originalText = skipBtn.textContent;
               skipBtn.textContent = "Cooldown!";
               skipBtn.style.color = "#e74c3c";
-              setTimeout(() => { 
-                skipBtn.textContent = originalText; 
-                skipBtn.style.color = "#E5C07B";
-              }, 1500);
+              setTimeout(() => { skipBtn.textContent = originalText; skipBtn.style.color = "#E5C07B"; }, 1500);
               return; 
             }
-
             const newTotal = (res.timeSavedSeconds || 0) + 90;
             chrome.storage.local.set({ timeSavedSeconds: newTotal, lastSkipTimestamp: now });
-            
             const timeSavedDisplay = document.getElementById('time-saved-display');
-            if (timeSavedDisplay) {
-              timeSavedDisplay.textContent = `${Math.floor(newTotal / 60)}m`;
-            }
+            if (timeSavedDisplay) timeSavedDisplay.textContent = `${Math.floor(newTotal / 60)}m`;
           });
         }
       });
     });
   }
 
-  // --- SETTINGS NAVIGATION ---
-  // --- SETTINGS NAVIGATION ---
   const settingsBtn = document.getElementById('settings-btn');
   if (settingsBtn) {
     settingsBtn.addEventListener('click', () => {
-      document.getElementById('main-view').classList.add('hidden');
-      document.getElementById('search-input').classList.add('hidden');
-      document.getElementById('autodetect-view').classList.add('hidden');
-      document.getElementById('settings-view').classList.remove('hidden');
+      window.showAppView('settings-view', false);
       
-      // FETCH ALL SETTINGS AND TOKENS
       chrome.storage.local.get(['trackingThreshold', 'whitelistedDomains', 'anilistToken', 'malToken', 'autoSkipEnabled', 'showUnlistedBadges'], (res) => {
-        // 1. Threshold Slider
         const threshold = res.trackingThreshold || 80;
         const slider = document.getElementById('threshold-slider');
         const display = document.getElementById('threshold-display');
-        if (slider && display) {
-          slider.value = threshold;
-          display.textContent = `${threshold}%`;
-        }
+        if (slider && display) { slider.value = threshold; display.textContent = `${threshold}%`; }
         
-        // Load Auto-Skip State
         const autoSkipToggle = document.getElementById('auto-skip-toggle');
         if (autoSkipToggle) autoSkipToggle.checked = !!res.autoSkipEnabled;
 
-        // ✅ Load Unlisted Badge State (Defaults to true)
         const unlistedToggle = document.getElementById('unlisted-badge-toggle');
         if (unlistedToggle) unlistedToggle.checked = res.showUnlistedBadges !== false;
 
-        // 2. Whitelist Manager
         renderWhitelistManager(res.whitelistedDomains || []);
 
-        // 3. Connected Accounts UI
         const aniLinkBtn = document.getElementById('settings-anilist-link-btn');
         const malLinkBtn = document.getElementById('settings-mal-link-btn');
-        const syncSection = document.getElementById('cross-sync-section'); // NEW
+        const syncSection = document.getElementById('cross-sync-section');
         
-        let hasAniList = false;
-        let hasMal = false;
+        let hasAniList = false; let hasMal = false;
 
         if (aniLinkBtn) {
           if (res.anilistToken) {
-            hasAniList = true;
-            aniLinkBtn.textContent = "✓ AniList Connected";
-            aniLinkBtn.style.borderColor = "#4cca51";
-            aniLinkBtn.style.color = "#4cca51";
-            aniLinkBtn.disabled = true; 
+            hasAniList = true; aniLinkBtn.textContent = "✓ AniList Connected";
+            aniLinkBtn.style.borderColor = "#4cca51"; aniLinkBtn.style.color = "#4cca51"; aniLinkBtn.disabled = true; 
           } else {
-            aniLinkBtn.textContent = "Link to AniList";
-            aniLinkBtn.style.borderColor = "#3db4f2";
-            aniLinkBtn.style.color = "#3db4f2";
-            aniLinkBtn.disabled = false;
+            aniLinkBtn.textContent = "Link to AniList"; aniLinkBtn.style.borderColor = "#3db4f2";
+            aniLinkBtn.style.color = "#3db4f2"; aniLinkBtn.disabled = false;
           }
         }
 
         if (malLinkBtn) {
           if (res.malToken) {
-            hasMal = true;
-            malLinkBtn.textContent = "✓ MAL Connected";
-            malLinkBtn.style.borderColor = "#4cca51";
-            malLinkBtn.style.color = "#4cca51";
-            malLinkBtn.disabled = true; 
+            hasMal = true; malLinkBtn.textContent = "✓ MAL Connected";
+            malLinkBtn.style.borderColor = "#4cca51"; malLinkBtn.style.color = "#4cca51"; malLinkBtn.disabled = true; 
           } else {
-            malLinkBtn.textContent = "Link to MyAnimeList";
-            malLinkBtn.style.borderColor = "#5C7CE5"; 
-            malLinkBtn.style.color = "#5C7CE5";
-            malLinkBtn.disabled = false;
+            malLinkBtn.textContent = "Link to MyAnimeList"; malLinkBtn.style.borderColor = "#5C7CE5"; 
+            malLinkBtn.style.color = "#5C7CE5"; malLinkBtn.disabled = false;
           }
         }
 
-        // Unhide the Sync feature only if both are connected!
-        if (hasAniList && hasMal && syncSection) {
-          syncSection.classList.remove('hidden');
-        } else if (syncSection) {
-          syncSection.classList.add('hidden');
-        }
+        if (hasAniList && hasMal && syncSection) syncSection.classList.remove('hidden');
+        else if (syncSection) syncSection.classList.add('hidden');
       });
     });
   }
@@ -412,8 +344,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const settingsBackBtn = document.getElementById('settings-back-btn');
   if (settingsBackBtn) {
     settingsBackBtn.addEventListener('click', () => {
-      document.getElementById('settings-view').classList.add('hidden');
-      loadAnimeList(); 
+      loadAnimeList(true); 
     });
   }
 
@@ -429,31 +360,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Save Auto-Skip State
   const autoSkipToggle = document.getElementById('auto-skip-toggle');
   if (autoSkipToggle) {
-    autoSkipToggle.addEventListener('change', (e) => {
-      chrome.storage.local.set({ autoSkipEnabled: e.target.checked });
-    });
+    autoSkipToggle.addEventListener('change', (e) => chrome.storage.local.set({ autoSkipEnabled: e.target.checked }));
   }
 
-  // ✅ NEW: Save Unlisted Badge State
   const unlistedToggle = document.getElementById('unlisted-badge-toggle');
   if (unlistedToggle) {
-    unlistedToggle.addEventListener('change', (e) => {
-      chrome.storage.local.set({ showUnlistedBadges: e.target.checked, trigger_dom_refresh: Date.now() });
-    });
+    unlistedToggle.addEventListener('change', (e) => chrome.storage.local.set({ showUnlistedBadges: e.target.checked, trigger_dom_refresh: Date.now() }));
   }
 
   const autodetectCancelBtn = document.getElementById('autodetect-cancel-btn');
   if (autodetectCancelBtn) {
     autodetectCancelBtn.addEventListener('click', () => {
-      document.getElementById('autodetect-view').classList.add('hidden');
       loadAnimeList(); 
     });
   }
 
-  // ✅ SURGICAL FIX 3: Wire up the Blue Anime/Manga Buttons & Fix Cancel Logic
   const handleWhitelist = (type) => {
     const hostnameEl = document.getElementById('whitelist-hostname');
     if (!hostnameEl) return;
@@ -483,126 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const newCancelBtn = whitelistCancelBtn.cloneNode(true);
     whitelistCancelBtn.replaceWith(newCancelBtn);
     newCancelBtn.addEventListener('click', () => {
-      document.getElementById('whitelist-view').classList.add('hidden');
       loadAnimeList(); 
-    });
-  }
-
-  // Broad Keyword & Strict Title Detector
-  async function checkCurrentTabForAnime() {
-    return new Promise((resolve) => {
-      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-        if (!tabs || tabs.length === 0) return resolve(false);
-        
-        const title = tabs[0].title || "";
-        let hostname = "unknown";
-        try { if (tabs[0].url) hostname = new URL(tabs[0].url).hostname; } catch (e) {}
-
-        let parsedTitle = "";
-        let parsedProgress = 0;
-        let detectedType = null; 
-
-        // 1. Anime Episode Regex
-        const animeRegex = /(?:Watch\s+)?(.*?)\s*(?:[-|—–:~]+\s*)?(?:Season\s*\d+\s*)?(?:Episode|Ep|EP|E)\.?\s*0*(\d+)/i;
-        const animeMatch = title.match(animeRegex);
-        
-        if (animeMatch && animeMatch[1] && animeMatch[2]) {
-          parsedTitle = animeMatch[1].replace(/[-|—–:~]+$/g, '').replace(/\s+\(?(?:Sub|Dub)\)?$/i, '').trim();
-          parsedProgress = parseInt(animeMatch[2], 10);
-          detectedType = 'ANIME';
-        } 
-        // 2. Manga Chapter Regex
-        else {
-          const chapRegex = /(?:Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)/i;
-          const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
-          
-          const chapMatch = title.match(chapRegex) || title.match(looseRegex);
-          
-          if (chapMatch) {
-            parsedProgress = parseFloat(chapMatch[1]);
-            const leftSide = title.substring(0, chapMatch.index).trim();
-            const rightSide = title.substring(chapMatch.index + chapMatch[0].length).trim();
-            let targetText = "";
-            
-            const cleanLeft = leftSide.replace(/[()[\]|]/g, '').trim();
-            if (cleanLeft === '' || /^(?:page\s*)?\d+\s*[-/]?\s*(?:\d+)?$/i.test(cleanLeft)) {
-              targetText = rightSide.replace(/[-|—|\|]\s*[a-zA-Z0-9]+$/i, '').trim();
-            } else {
-              targetText = leftSide;
-            }
-
-            let clean = targetText.replace(/\b(?:Read|Watch|Free|English|Online|Scanlation|Scans|Scan|Manga|Manhwa|Manhua|Webtoon)\b/gi, '');
-            clean = clean.replace(/\[.*?\]|\(.*?\)/g, '');
-            parsedTitle = clean.replace(/^[-|—–:~,\|\s]+|[-|—–:~,\|\s]+$/g, '').replace(/\s{2,}/g, ' ').trim();
-            detectedType = 'MANGA';
-          }
-        }
-
-        // ✅ SURGICAL FIX 4: Flawless Object Parsing & Routing
-        chrome.storage.local.get(['whitelistedDomains'], async (result) => {
-          const domains = result.whitelistedDomains || [];
-          
-          const safeDomains = domains.map(d => typeof d === 'string' ? d : d.domain).filter(Boolean);
-          const safeTypes = domains.map(d => typeof d === 'string' ? 'ANIME' : (d.type || 'ANIME'));
-          
-          const cleanHost = hostname.replace(/^www\./, '').trim().toLowerCase();
-          let isWhitelisted = false;
-          let matchedIndex = -1;
-
-          for (let i = 0; i < safeDomains.length; i++) {
-              const d = safeDomains[i];
-              if (!d || d.trim() === '') continue; 
-              const cleanD = d.replace(/^www\./, '').trim().toLowerCase();
-              if (cleanHost === cleanD || cleanHost.endsWith('.' + cleanD) || cleanD.endsWith('.' + cleanHost)) {
-                  isWhitelisted = true;
-                  matchedIndex = i;
-                  break;
-              }
-          }
-
-          if (!isWhitelisted) {
-              const keywordRegex = /anime|manga|manhwa|manhua|webtoon|comic|read|watch/i;
-              const isAnimeSite = keywordRegex.test(title) || keywordRegex.test(hostname);
-              const isValidHost = hostname !== "unknown" && !hostname.includes("chrome") && !hostname.includes("google.");
-
-              if (isValidHost && (detectedType || isAnimeSite)) {
-                  showWhitelistView(hostname);
-                  return resolve(true);
-              }
-              return resolve(false);
-          }
-
-          const finalSearchType = matchedIndex !== -1 ? safeTypes[matchedIndex] : (detectedType || currentMode);
-
-          if (finalSearchType && finalSearchType !== currentMode) {
-             currentMode = finalSearchType;
-             chrome.storage.local.set({ currentMode: currentMode });
-             const modeBtn = document.getElementById('mode-toggle-btn');
-             if (modeBtn) modeBtn.textContent = currentMode === 'ANIME' ? '📺' : '📖';
-             currentFilter = currentMode === 'ANIME' ? 'SCHEDULE' : 'CURRENT';
-             const viewLabel = document.getElementById('current-view-label');
-             if (viewLabel) viewLabel.textContent = currentMode === 'ANIME' ? 'Schedule (My List) ▾' : 'Currently Reading ▾';
-             if (typeof updateDropdownMenu === 'function') updateDropdownMenu();
-          }
-
-          if (detectedType || parsedTitle) {
-              try {
-                  let media = await searchAnimeWithFallbacks(parsedTitle, finalSearchType);
-                  if (!media && finalSearchType === 'MANGA') {
-                    media = { id: -1, title: { romaji: parsedTitle || "Unknown Title", english: null }, coverImage: { medium: 'icons/icon128.png', large: 'icons/icon128.png' }, chapters: '?', mediaListEntry: null };
-                  }
-                  if (media) {
-                    detectedMedia = media;
-                    detectedEpisode = parsedProgress;
-                    showAutoDetectView(media, parsedProgress, finalSearchType);
-                    return resolve(true);
-                  }
-              } catch (e) {}
-          }
-          
-          return resolve(false); 
-        });
-      });
     });
   }
 
@@ -629,32 +433,86 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const autoConfirmBtn = document.getElementById('autodetect-confirm-btn');
   if (autoConfirmBtn) autoConfirmBtn.addEventListener('click', handleAutoDetectConfirm);
+
+  // Binding Event Listeners
+  document.getElementById('bind-id-btn')?.addEventListener('click', () => {
+    const inputVal = document.getElementById('bind-id-input').value;
+    const parsed = parseMediaIdFromInput(inputVal);
+    if (!parsed || !currentSelectedAnime) return;
+    
+    const btn = document.getElementById('bind-id-btn');
+    btn.textContent = 'Binding...';
+    btn.disabled = true;
+  
+    chrome.runtime.sendMessage({
+      action: "REBIND_MEDIA_ID",
+      oldMediaId: currentSelectedAnime.media.id,
+      targetId: parsed.id,
+      targetType: parsed.type,
+      mediaType: currentMode,
+      title: currentSelectedAnime.media.title.romaji,
+      progress: parseInt(document.getElementById('episode-input').value, 10) || 0
+    }, (res) => {
+      btn.disabled = false;
+      if (res && res.success) {
+        btn.textContent = 'Bound! ✓';
+        setTimeout(() => {
+          btn.textContent = 'Bind';
+          loadAnimeList(true);
+        }, 800);
+      } else {
+        btn.textContent = 'Failed';
+        setTimeout(() => { btn.textContent = 'Bind'; }, 1500);
+      }
+    });
+  });
+  
+  document.getElementById('mark-unlisted-btn')?.addEventListener('click', () => {
+    if (!currentSelectedAnime) return;
+    const btn = document.getElementById('mark-unlisted-btn');
+    btn.textContent = 'Updating...';
+    btn.disabled = true;
+  
+    chrome.runtime.sendMessage({
+      action: "MARK_AS_UNLISTED",
+      oldMediaId: currentSelectedAnime.media.id,
+      title: currentSelectedAnime.media.title.romaji,
+      progress: parseInt(document.getElementById('episode-input').value, 10) || 0,
+      mediaType: currentMode
+    }, (res) => {
+      btn.disabled = false;
+      btn.textContent = 'Set as Unlisted (Local OTG Only)';
+      loadAnimeList(true);
+    });
+  });
 });
 
-// ==========================================
-// 🔐 AUTHENTICATION LOGIC
-// ==========================================
+function parseMediaIdFromInput(inputVal) {
+  if (!inputVal) return null;
+  inputVal = inputVal.trim();
+  const alMatch = inputVal.match(/anilist\.co\/(?:anime|manga)\/(\d+)/i);
+  if (alMatch) return { type: 'AL', id: parseInt(alMatch[1], 10) };
+  const malMatch = inputVal.match(/myanimelist\.net\/(?:anime|manga)\/(\d+)/i);
+  if (malMatch) return { type: 'MAL', id: parseInt(malMatch[1], 10) };
+  if (/^\d+$/.test(inputVal)) return { type: 'AL', id: parseInt(inputVal, 10) };
+  return null;
+}
 
+// Authentication Logic
 function handleLoginClick(e) {
   const btn = e ? e.currentTarget : document.getElementById('login-btn');
   const originalText = btn ? btn.textContent : "Log In";
-  
   if (btn) btn.textContent = "Connecting...";
 
   const safeClientId = typeof CLIENT_ID !== 'undefined' ? CLIENT_ID : '45996';
   const authUrl = `https://anilist.co/api/v2/oauth/authorize?client_id=${safeClientId}&response_type=token`;
 
   chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (redirectUrlResult) => {
-    if (chrome.runtime.lastError) {
+    if (chrome.runtime.lastError || !redirectUrlResult) {
       if (btn) btn.textContent = "Error - Check Console";
       setTimeout(() => { if (btn) btn.textContent = originalText; }, 3000);
       return;
     }
-    if (!redirectUrlResult) {
-      if (btn) btn.textContent = originalText;
-      return;
-    }
-    
     const hash = new URL(redirectUrlResult).hash;
     const token = new URLSearchParams(hash.substring(1)).get('access_token');
     
@@ -663,14 +521,9 @@ function handleLoginClick(e) {
       chrome.storage.local.set({ anilistToken: accessToken }, () => {
         updateAuthUI(true);
         initializeApp();
-        
         if (btn && btn.id.includes('settings')) {
-          btn.textContent = "✓ AniList Connected";
-          btn.style.borderColor = "#4cca51";
-          btn.style.color = "#4cca51";
-        } else if (btn) {
-          btn.textContent = originalText; 
-        }
+          btn.textContent = "✓ AniList Connected"; btn.style.borderColor = "#4cca51"; btn.style.color = "#4cca51";
+        } else if (btn) btn.textContent = originalText; 
       });
     } else {
       if (btn) btn.textContent = "Failed to get token";
@@ -679,27 +532,16 @@ function handleLoginClick(e) {
   });
 }
 
-
-
 function handleMalLoginClick(e) {
   const btn = e ? e.currentTarget : document.getElementById('settings-mal-link-btn');
   if (btn) btn.textContent = "Check browser window...";
-
-  // Ping the background script to launch the persistent Auth Flow
   chrome.runtime.sendMessage({ action: "LOGIN_MAL" });
-
-  // Note: The popup will close automatically when the auth window steals focus. 
-  // When you reopen the popup, it will read the newly saved token and show "✓ MAL Connected"!
 }
 
 function handleLogoutClick() {
   chrome.storage.local.remove(['anilistToken', 'malToken', 'malRefreshToken', 'cachedList_data', 'cachedList_filter'], () => {
-    accessToken = null;
-    userId = null;
-    currentSelectedAnime = null;
-    cachedWatchingList = [];
-    cachedAllScheduleList = [];
-    currentFilter = 'SCHEDULE';
+    accessToken = null; userId = null; currentSelectedAnime = null;
+    cachedWatchingList = []; cachedAllScheduleList = []; currentFilter = 'SCHEDULE';
     
     document.getElementById('day-tabs').innerHTML = '';
     document.getElementById('anime-list').innerHTML = '';
@@ -712,7 +554,6 @@ function handleLogoutClick() {
         chrome.cookies.remove({ url: cookieUrl, name: cookie.name });
       });
     });
-
     updateAuthUI(false);
   });
 }
@@ -720,35 +561,21 @@ function handleLogoutClick() {
 function updateAuthUI(isLoggedIn) {
   const loginView = document.getElementById('login-view');
   const appView = document.getElementById('app-view');
-  const detailView = document.getElementById('detail-view');
-  const autodetectView = document.getElementById('autodetect-view');
-  const settingsView = document.getElementById('settings-view');
 
   if (isLoggedIn) {
     if (loginView) loginView.classList.add('hidden');
     if (appView) appView.classList.remove('hidden');
-    if (autodetectView) autodetectView.classList.add('hidden'); 
-    if (settingsView) settingsView.classList.add('hidden');
+    if (window.showAppView) window.showAppView('main-view', true);
   } else {
     if (loginView) loginView.classList.remove('hidden');
     if (appView) appView.classList.add('hidden');
-    if (detailView) detailView.classList.add('hidden');
   }
 }
-
-
-// ==========================================
-// 📡 API CORE & BOOTSTRAP
-// ==========================================
 
 async function apiRequest(query, variables = {}) {
   const response = await fetch('https://graphql.anilist.co', {
     method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + accessToken,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
+    headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json', 'Accept': 'application/json' },
     body: JSON.stringify({ query, variables })
   });
   return response.json();
@@ -756,8 +583,6 @@ async function apiRequest(query, variables = {}) {
 
 async function initializeApp() {
   document.getElementById('anime-list').innerHTML = '';
-  
-  // NEW: Added options { profileColor } to the query!
   const viewerQuery = `query { Viewer { id name avatar { medium } options { profileColor } } }`;
   
   try {
@@ -768,24 +593,12 @@ async function initializeApp() {
     document.getElementById('user-avatar').src = viewer.avatar.medium;
     document.getElementById('user-name').textContent = viewer.name;
 
-    // --- NEW: PROFILE COLOR SYNC LOGIC ---
-    const colorMap = {
-      "blue": "#3db4f2", "purple": "#c063ff", "pink": "#fc9dd6",
-      "orange": "#ef881a", "red": "#e13333", "green": "#4cca51", "gray": "#677b94"
-    };
-    // Map the string to a hex, or use the custom hex if the user is an AniList Donator
+    const colorMap = { "blue": "#3db4f2", "purple": "#c063ff", "pink": "#fc9dd6", "orange": "#ef881a", "red": "#e13333", "green": "#4cca51", "gray": "#677b94" };
     const userColor = viewer.options?.profileColor;
     const hexColor = colorMap[userColor] || userColor || "#3db4f2";
-    
-    // Inject the color globally into the CSS variables
     document.documentElement.style.setProperty('--anilist-color', hexColor);
-    // -------------------------------------
 
-    chrome.storage.local.set({ 
-      anilistUserId: userId,
-      anilistUsername: viewer.name,
-      anilistAvatar: viewer.avatar.medium
-    });
+    chrome.storage.local.set({ anilistUserId: userId, anilistUsername: viewer.name, anilistAvatar: viewer.avatar.medium });
 
     chrome.storage.local.get(['equippedBadge'], (res) => {
       if (res.equippedBadge) {
@@ -797,12 +610,10 @@ async function initializeApp() {
 
     if (typeof loadUserLevel === 'function') loadUserLevel(userId);
 
-    // ✅ FEATURE 3: Fetch Cloud Preferences & Check Nudge
     chrome.runtime.sendMessage({ action: "FETCH_CLOUD_PREFS", userId: userId }, () => {
       chrome.storage.local.get(['cloud_mal_linked', 'malToken'], (prefs) => {
         const banner = document.getElementById('mal-link-banner');
         const linkBtn = document.getElementById('banner-mal-link-btn');
-        // If Cloud says MAL is linked, but local token is missing, show the warning nudge
         if (prefs.cloud_mal_linked && !prefs.malToken && banner) {
           banner.classList.remove('hidden');
           linkBtn.addEventListener('click', handleMalLoginClick);
@@ -814,19 +625,16 @@ async function initializeApp() {
 
     const foundAnimeOnTab = await checkCurrentTabForAnime();
     if (!foundAnimeOnTab) loadAnimeList(); 
-  } catch (error) {
-    console.error("Error fetching Viewer ID:", error);
-  }
+  } catch (error) {}
 }
 
-// ✅ SURGICAL FIX 2: Restore Anime/Manga Toggles in Settings
 function renderWhitelistManager(domains) {
   const container = document.getElementById('whitelist-manager-list');
   if (!container) return;
   container.innerHTML = '';
 
   if (domains.length === 0) {
-    container.innerHTML = '<p style="font-size: 12px; text-align: center; opacity: 0.7; margin: 10px 0;">No sites whitelisted yet.</p>';
+    container.innerHTML = '<p class="placeholder-text">No sites whitelisted yet.</p>';
     return;
   }
 
@@ -839,8 +647,8 @@ function renderWhitelistManager(domains) {
     
     item.innerHTML = `
       <div style="display: flex; align-items: center; gap: 10px;">
-        <div class="domain-type-toggle" data-index="${index}" title="Toggle Anime/Manga" style="display: inline-flex; align-items: center; background: #1a2636; border-radius: 12px; cursor: pointer; padding: 2px; width: 40px; position: relative; border: 1px solid #2b3a4a; flex-shrink: 0; box-sizing: border-box; transition: background-color 0.3s;">
-          <div style="width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: #fff; transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); background: ${domainType === 'ANIME' ? '#3db4f2' : '#E5C07B'}; transform: ${domainType === 'ANIME' ? 'translateX(0)' : 'translateX(18px)'};">${domainType === 'ANIME' ? 'A' : 'M'}</div>
+        <div class="domain-type-toggle ${domainType.toLowerCase()}" data-index="${index}" title="Toggle Anime/Manga">
+          <div class="domain-type-indicator">${domainType === 'ANIME' ? 'A' : 'M'}</div>
         </div>
         <span>${domainStr}</span>
       </div>
@@ -870,11 +678,6 @@ function renderWhitelistManager(domains) {
   });
 }
 
-// ==========================================
-// 🔍 AUTO-DETECT ENGINE
-// ==========================================
-
-// NEW: Added apiType as a parameter
 async function searchAnimeWithFallbacks(rawTitle, apiType) {
   const query = `
     query ($search: String, $type: MediaType) {
@@ -890,25 +693,22 @@ async function searchAnimeWithFallbacks(rawTitle, apiType) {
     return res.data?.Media || null;
   }
 
-  // --- SMART TITLE SANITIZER ---
   function getSearchPermutations(title) {
     const base = title.replace(/[’‘`]/g, "'").replace(/\s+/g, ' ').trim();
     const noBrackets = base.replace(/\[.*?\]|\(.*?\)/g, '').trim();
     const noPunc = noBrackets.replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim();
-    const shortTerm = noPunc.split(' ').slice(0, 4).join(' '); // First 4 words fallback
+    const shortTerm = noPunc.split(' ').slice(0, 4).join(' '); 
     const splitDash = base.split(/[:\-]/)[0].trim();
     return [...new Set([base, noBrackets, noPunc, splitDash, shortTerm])].filter(t => t.length > 2);
   }
 
   const perms = getSearchPermutations(rawTitle);
 
-  // 1. Try strict AniList Search
   for (const term of perms) {
     let media = await doSearch(term);
     if (media) return media;
   }
 
-  // 2. NEW: The Progressive Tenrai API Search Bridge
   const endpoint = apiType === 'ANIME' ? 'anime' : 'manga';
   let resolvedMalId = null;
   let tenraiNode = null;
@@ -922,24 +722,20 @@ async function searchAnimeWithFallbacks(rawTitle, apiType) {
           tenraiNode = tenraiData.data[0];
           resolvedMalId = tenraiNode.mal_id;
 
-          // Cross-reference back to AniList using the exact MAL ID!
           const crossRefQuery = `query($idMal: Int, $type: MediaType) { Media(idMal: $idMal, type: $type) { id idMal status title { romaji english } coverImage { large medium } episodes chapters mediaListEntry { id progress status } } }`;
           const crossRefRes = await apiRequest(crossRefQuery, { idMal: resolvedMalId, type: apiType });
           
           if (crossRefRes.data?.Media) {
-              console.log(`[Shiinah] Tenrai Bridge Success! Matched via MAL ID: ${resolvedMalId}`);
               return crossRefRes.data.Media; 
           }
-          break; // Found the MAL ID, but AniList doesn't track it. Move to MAL fallback.
+          break; 
         }
       }
     } catch(e) {}
   }
 
-  // 3. Absolute Fallback to Official MAL API
   const storage = await chrome.storage.local.get(['malToken']);
   if (storage.malToken) {
-    // If Tenrai found the MAL ID, fetch directly from MAL
     if (resolvedMalId) {
       try {
         const res = await fetch(`https://api.myanimelist.net/v2/${endpoint}/${resolvedMalId}?fields=id,title,alternative_titles,main_picture,status,num_episodes,num_chapters,my_list_status`, {
@@ -948,24 +744,16 @@ async function searchAnimeWithFallbacks(rawTitle, apiType) {
         const malNode = await res.json();
         if (malNode && malNode.id) {
           return {
-            id: -malNode.id,
-            idMal: malNode.id,
-            isMalOnly: true,
-            status: malNode.status ? malNode.status.toUpperCase() : "RELEASING",
+            id: -malNode.id, idMal: malNode.id, isMalOnly: true, status: malNode.status ? malNode.status.toUpperCase() : "RELEASING",
             title: { romaji: malNode.title, english: malNode.alternative_titles?.en || malNode.title },
             coverImage: { large: malNode.main_picture?.large, medium: malNode.main_picture?.medium },
-            episodes: apiType === 'ANIME' ? (malNode.num_episodes || null) : null,
-            chapters: apiType === 'MANGA' ? (malNode.num_chapters || null) : null,
-            mediaListEntry: malNode.my_list_status ? {
-              progress: apiType === 'ANIME' ? malNode.my_list_status.num_episodes_watched : malNode.my_list_status.num_chapters_read,
-              status: 'CURRENT'
-            } : null
+            episodes: apiType === 'ANIME' ? (malNode.num_episodes || null) : null, chapters: apiType === 'MANGA' ? (malNode.num_chapters || null) : null,
+            mediaListEntry: malNode.my_list_status ? { progress: apiType === 'ANIME' ? malNode.my_list_status.num_episodes_watched : malNode.my_list_status.num_chapters_read, status: 'CURRENT' } : null
           };
         }
       } catch(e) {}
     }
 
-    // If Tenrai completely failed, text search MAL
     for (const term of perms) {
       try {
         const res = await fetch(`https://api.myanimelist.net/v2/${endpoint}?q=${encodeURIComponent(term)}&limit=1&fields=id,title,alternative_titles,main_picture,status,num_episodes,num_chapters,my_list_status`, {
@@ -975,44 +763,29 @@ async function searchAnimeWithFallbacks(rawTitle, apiType) {
         if (data?.data && data.data.length > 0) {
           const malNode = data.data[0].node;
           return {
-            id: -malNode.id,
-            idMal: malNode.id,
-            isMalOnly: true,
-            status: malNode.status ? malNode.status.toUpperCase() : "RELEASING",
+            id: -malNode.id, idMal: malNode.id, isMalOnly: true, status: malNode.status ? malNode.status.toUpperCase() : "RELEASING",
             title: { romaji: malNode.title, english: malNode.alternative_titles?.en || malNode.title },
             coverImage: { large: malNode.main_picture?.large, medium: malNode.main_picture?.medium },
-            episodes: apiType === 'ANIME' ? (malNode.num_episodes || null) : null,
-            chapters: apiType === 'MANGA' ? (malNode.num_chapters || null) : null,
-            mediaListEntry: malNode.my_list_status ? {
-              progress: apiType === 'ANIME' ? malNode.my_list_status.num_episodes_watched : malNode.my_list_status.num_chapters_read,
-              status: 'CURRENT'
-            } : null
+            episodes: apiType === 'ANIME' ? (malNode.num_episodes || null) : null, chapters: apiType === 'MANGA' ? (malNode.num_chapters || null) : null,
+            mediaListEntry: malNode.my_list_status ? { progress: apiType === 'ANIME' ? malNode.my_list_status.num_episodes_watched : malNode.my_list_status.num_chapters_read, status: 'CURRENT' } : null
           };
         }
       } catch(e) {}
     }
   }
 
-  // 4. Ultimate Fallback: Create rich OTG save from Tenrai data
   if (tenraiNode) {
-      console.log(`[Shiinah] Not on AniList/MAL. Using Tenrai data for rich OTG Save.`);
       return {
-        id: -tenraiNode.mal_id, // Negative ID triggers OTG local saving
-        idMal: tenraiNode.mal_id,
-        isMalOnly: true,
-        status: tenraiNode.status ? tenraiNode.status.toUpperCase() : "RELEASING",
+        id: -tenraiNode.mal_id, idMal: tenraiNode.mal_id, isMalOnly: true, status: tenraiNode.status ? tenraiNode.status.toUpperCase() : "RELEASING",
         title: { romaji: tenraiNode.title, english: tenraiNode.title_english || tenraiNode.title },
         coverImage: { large: tenraiNode.images?.jpg?.large_image_url || '', medium: tenraiNode.images?.jpg?.image_url || '' },
-        episodes: apiType === 'ANIME' ? (tenraiNode.episodes || null) : null,
-        chapters: apiType === 'MANGA' ? (tenraiNode.chapters || null) : null,
+        episodes: apiType === 'ANIME' ? (tenraiNode.episodes || null) : null, chapters: apiType === 'MANGA' ? (tenraiNode.chapters || null) : null,
         mediaListEntry: null 
       };
   }
-
   return null; 
 }
 
-// ✅ SURGICAL FIX 2: Bulletproof Domain Checker
 async function checkCurrentTabForAnime() {
   return new Promise((resolve) => {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
@@ -1022,11 +795,8 @@ async function checkCurrentTabForAnime() {
       let hostname = "unknown";
       try { if (tabs[0].url) hostname = new URL(tabs[0].url).hostname; } catch (e) {}
 
-      let parsedTitle = "";
-      let parsedProgress = 0;
-      let detectedType = null; 
+      let parsedTitle = "", parsedProgress = 0, detectedType = null; 
 
-      // 1. Try Anime Regex
       const animeRegex = /(?:Watch\s+)?(.*?)\s*(?:[-|—–:~]+\s*)?(?:Season\s*\d+\s*)?(?:Episode|Ep|EP|E)\.?\s*0*(\d+)/i;
       const animeMatch = title.match(animeRegex);
       
@@ -1035,7 +805,6 @@ async function checkCurrentTabForAnime() {
         parsedProgress = parseInt(animeMatch[2], 10);
         detectedType = 'ANIME';
       } 
-      // 2. Try Manga Regex
       else {
         const chapRegex = /(?:Chapter|Ch\.|Ch)\s*0*(\d+(\.\d+)?)/i;
         const looseRegex = /[-|\|]\s*0*(\d+(\.\d+)?)\s*(?:\||-|$)/;
@@ -1058,11 +827,8 @@ async function checkCurrentTabForAnime() {
         }
       }
 
-      // 3. Whitelist & Auto-Detect Routing
       chrome.storage.local.get(['whitelistedDomains'], async (result) => {
         const domains = result.whitelistedDomains || [];
-        
-        // Standardize array to strings to fix the "[object Object]" bug
         const safeDomains = domains.map(d => typeof d === 'string' ? d : d.domain).filter(Boolean);
         const safeTypes = domains.map(d => typeof d === 'string' ? 'ANIME' : (d.type || 'ANIME'));
 
@@ -1071,13 +837,11 @@ async function checkCurrentTabForAnime() {
         const isAnimeSite = keywordRegex.test(title) || keywordRegex.test(hostname);
         const isValidHost = hostname !== "unknown" && !hostname.includes("chrome") && !hostname.includes("google.");
 
-        // ✅ EXACT LOGIC: If it's a valid site, looks like anime/manga, and is NOT whitelisted -> FORCE PROMPT
         if (!isWhitelisted && isValidHost && (detectedType || isAnimeSite)) {
            showWhitelistView(hostname);
            return resolve(true);
         }
 
-        // ✅ EXACT LOGIC: If it IS whitelisted, run the auto-switcher and detection
         if (isWhitelisted) {
            const matchedIndex = safeDomains.findIndex(d => hostname.includes(d) || d.includes(hostname));
            const finalSearchType = matchedIndex !== -1 ? safeTypes[matchedIndex] : (detectedType || currentMode);
@@ -1085,8 +849,8 @@ async function checkCurrentTabForAnime() {
            if (finalSearchType && finalSearchType !== currentMode) {
               currentMode = finalSearchType;
               chrome.storage.local.set({ currentMode: currentMode });
-              const modeBtn = document.getElementById('mode-toggle-btn');
-              if (modeBtn) modeBtn.textContent = currentMode === 'ANIME' ? '📺' : '📖';
+              const modeIcon = document.getElementById('mode-icon');
+              if (modeIcon) modeIcon.src = currentMode === 'ANIME' ? 'icons/monitor.svg' : 'icons/book-open.svg';
               currentFilter = currentMode === 'ANIME' ? 'SCHEDULE' : 'CURRENT';
               const viewLabel = document.getElementById('current-view-label');
               if (viewLabel) viewLabel.textContent = currentMode === 'ANIME' ? 'Schedule (My List) ▾' : 'Currently Reading ▾';
@@ -1107,8 +871,6 @@ async function checkCurrentTabForAnime() {
                } catch (e) {}
            }
         }
-        
-        // If it's whitelisted but no specific show is playing (e.g. homepage), load Main View
         return resolve(false); 
       });
     });
@@ -1116,51 +878,28 @@ async function checkCurrentTabForAnime() {
 }
 
 function showWhitelistView(hostname) {
-  document.getElementById('main-view').classList.add('hidden');
-  document.getElementById('search-input').classList.add('hidden'); 
-  document.getElementById('autodetect-view').classList.add('hidden');
-  
-  // ✅ SURGICAL FIX: Hide the header
+  window.showAppView('whitelist-view', false);
   const headerEl = document.querySelector('.header');
   if (headerEl) headerEl.classList.add('hidden');
 
-  document.getElementById('whitelist-view').classList.remove('hidden');
-  
   const hostEl = document.getElementById('whitelist-hostname');
   if (hostEl) hostEl.textContent = hostname;
 }
 
-// NEW: Added detectedType as a parameter
 function showAutoDetectView(media, progressNum, detectedType) {
-  document.getElementById('main-view').classList.add('hidden');
-  document.getElementById('search-input').classList.add('hidden'); 
-  document.getElementById('autodetect-view').classList.remove('hidden');
+  window.showAppView('autodetect-view', false);
 
-  // NEW: DYNAMIC SYNC BADGES
   const badgesContainer = document.getElementById('autodetect-badges');
   if (badgesContainer) {
-    badgesContainer.innerHTML = ''; // Clear previous
-    
-    // AniList Badge (Only if it came from AniList)
-    if (media.id > 0 && !media.isMalOnly) {
-      badgesContainer.innerHTML += `<span style="background: rgba(61,180,242,0.15); border: 1px solid #3db4f2; color: #3db4f2; padding: 2px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; text-transform: uppercase;">AL Sync</span>`;
-    }
-    
-    // MAL Badge (If it has a MAL ID from AniList, or if it was found exclusively on MAL)
-    if (media.idMal || media.isMalOnly) {
-       badgesContainer.innerHTML += `<span style="background: rgba(46,81,162,0.15); border: 1px solid #2E51A2; color: #5C7CE5; padding: 2px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; text-transform: uppercase;">MAL Sync</span>`;
-    }
-
-    // OTG Local Badge (If it's a negative ID custom manga)
-    if (media.id < 0) {
-      badgesContainer.innerHTML += `<span style="background: rgba(229,192,123,0.15); border: 1px solid #E5C07B; color: #E5C07B; padding: 2px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; text-transform: uppercase;">OTG Local</span>`;
-    }
+    badgesContainer.innerHTML = ''; 
+    if (media.id > 0 && !media.isMalOnly) badgesContainer.innerHTML += `<span style="background: rgba(61,180,242,0.15); border: 1px solid #3db4f2; color: #3db4f2; padding: 2px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; text-transform: uppercase;">AL Sync</span>`;
+    if (media.idMal || media.isMalOnly) badgesContainer.innerHTML += `<span style="background: rgba(46,81,162,0.15); border: 1px solid #2E51A2; color: #5C7CE5; padding: 2px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; text-transform: uppercase;">MAL Sync</span>`;
+    if (media.id < 0) badgesContainer.innerHTML += `<span style="background: rgba(229,192,123,0.15); border: 1px solid #E5C07B; color: #E5C07B; padding: 2px 10px; border-radius: 12px; font-size: 10px; font-weight: bold; text-transform: uppercase;">OTG Local</span>`;
   }
   
   document.getElementById('autodetect-img').src = media.coverImage.medium;
   document.getElementById('autodetect-title').textContent = media.title.english || media.title.romaji;
   
-  // NEW: Reset progress bar UI and set correct terminology
   const progressTextEl = document.getElementById('video-progress-text');
   const progressBarEl = document.getElementById('video-progress-bar');
   if (progressTextEl) progressTextEl.textContent = detectedType === 'ANIME' ? 'Video Progress: 0.0%' : 'Reading Progress: 0.0%';
@@ -1177,81 +916,53 @@ function showAutoDetectView(media, progressNum, detectedType) {
   actionsEl.classList.remove('hidden');
   if (confirmBtn) confirmBtn.classList.add('hidden');
   
-// DYNAMIC TEXT LABELS based on detectedType
   if (cancelBtn) cancelBtn.textContent = detectedType === 'ANIME' ? 'View My Anime List' : 'View My Manga List';
   if (headerEl) headerEl.textContent = detectedType === 'ANIME' ? "We noticed you're watching..." : "We noticed you're reading...";
   const unit = detectedType === 'ANIME' ? 'Ep' : 'Ch';
   
-  // --- NEW: CUSTOM MANGA UI LOGIC ---
   if (media.id < 0) {
     epTextEl.textContent = `Tracking ${unit} ${progressNum}... (Saved locally to OTG)`;
     epTextEl.style.color = "#E5C07B";
-    if (confirmBtn) confirmBtn.classList.add('hidden'); // Hide the AniList sync button
-  } 
-  // --- STANDARD ANILIST UI LOGIC ---
-  else if (currentProg >= progressNum) {
+    if (confirmBtn) confirmBtn.classList.add('hidden'); 
+  } else if (currentProg >= progressNum) {
     epTextEl.textContent = `✅ You are already at ${unit} ${currentProg}`;
     epTextEl.style.color = "#98C379"; 
   } else {
-    if (detectedType === 'ANIME') {
-      epTextEl.textContent = `Tracking ${unit} ${progressNum}... (Auto-updates at ${currentThreshold}%)`;
-    } else {
-      epTextEl.textContent = `Tracking ${unit} ${progressNum}... (Auto-updates via reader)`;
-    }
+    epTextEl.textContent = detectedType === 'ANIME' ? `Tracking ${unit} ${progressNum}... (Auto-updates at ${currentThreshold}%)` : `Tracking ${unit} ${progressNum}... (Auto-updates via reader)`;
     epTextEl.style.color = "#E5C07B"; 
   }
 
-
-  // --- ANISKIP LOGIC ---
   const skipBtn = document.getElementById('skip-intro-btn');
   if (skipBtn) {
-    if (detectedType === 'MANGA') {
-      skipBtn.classList.add('hidden'); // No intros in manga!
-    } else {
+    if (detectedType === 'MANGA') skipBtn.classList.add('hidden'); 
+    else {
       skipBtn.classList.remove('hidden');
       skipBtn.textContent = '⏭ Checking Fallback Tier...';
 
-      // Query the active tab to get the current fallback tier from content.js
-      // popup.js
-
-chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-  if (tabs[0]) {
-    chrome.tabs.sendMessage(tabs[0].id, { action: "GET_ACTIVE_SKIP_TIER" }, (res) => {
-      // ✅ FIX: Added !res.tierText check to prevent crash if tierText is undefined
-      if (chrome.runtime.lastError || !res || !res.tierText) {
-        skipBtn.textContent = '⏭ Skip 1:30 (Tier: Unknown)';
-        skipBtn.style.color = "#e74c3c";
-        skipBtn.style.borderColor = "#e74c3c";
-      } else {
-        skipBtn.textContent = `⏭ Skip 1:30 (${res.tierText})`;
-
-        // Safely check tier string match
-        const tier = res.tierText;
-        if (
-          tier.includes("Tier 1") || 
-          tier.includes("Tier 2") || 
-          tier.includes("Tier 3") || 
-          tier.includes("AniSkip") || 
-          tier.includes("In-House") || 
-          tier.includes("HLS")
-        ) {
-          skipBtn.style.color = "#4cca51";
-          skipBtn.style.borderColor = "#4cca51";
-        } else {
-          // Warning color for behavioral or fallback tiers
-          skipBtn.style.color = "#E5C07B"; 
-          skipBtn.style.borderColor = "#E5C07B";
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, { action: "GET_ACTIVE_SKIP_TIER" }, (res) => {
+            if (chrome.runtime.lastError || !res || !res.tierText) {
+              skipBtn.textContent = '⏭ Skip 1:30 (Tier: Unknown)';
+              skipBtn.style.color = "#e74c3c";
+              skipBtn.style.borderColor = "#e74c3c";
+            } else {
+              skipBtn.textContent = `⏭ Skip 1:30 (${res.tierText})`;
+              const tier = res.tierText;
+              if (tier.includes("Tier 1") || tier.includes("Tier 2") || tier.includes("Tier 3") || tier.includes("AniSkip") || tier.includes("In-House") || tier.includes("HLS")) {
+                skipBtn.style.color = "#4cca51";
+              } else {
+                skipBtn.style.color = "#E5C07B"; 
+              }
+            }
+          });
         }
-      }
-    });
-  }
-});
+      });
     }
   }
 }
 
 chrome.runtime.onMessage.addListener((message, sender) => {
-  // --- VIDEO PROGRESS LISTENER ---
   if (message.action === "LIVE_VIDEO_PROGRESS") {
     const pct = message.progress.toFixed(1);
     const progressBar = document.getElementById('video-progress-bar');
@@ -1263,7 +974,6 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       progressText.textContent = `Video Progress: ${pct}%`;
     }
 
-    // ✅ RENDER INTRO/OUTRO MARKERS & LABELS
     const container = document.getElementById('video-progress-container');
     if (container && message.duration) {
       container.style.position = 'relative'; 
@@ -1276,23 +986,16 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         container.appendChild(markerOverlay);
       }
 
-      // Priority: Tier 1/2 API data first; Fall back to manual session skips (Tier 3/4)
       let skipsToDraw = [];
-      if (Array.isArray(message.aniSkipData) && message.aniSkipData.length > 0) {
-        skipsToDraw = message.aniSkipData;
-      } else if (Array.isArray(message.sessionSkips) && message.sessionSkips.length > 0) {
-        skipsToDraw = message.sessionSkips;
-      }
+      if (Array.isArray(message.aniSkipData) && message.aniSkipData.length > 0) skipsToDraw = message.aniSkipData;
+      else if (Array.isArray(message.sessionSkips) && message.sessionSkips.length > 0) skipsToDraw = message.sessionSkips;
 
       markerOverlay.innerHTML = '';
-
       skipsToDraw.forEach(skip => {
         if (!skip.interval || skip.interval.startTime == null || skip.interval.endTime == null) return;
-
         const startPct = Math.max(0, (skip.interval.startTime / message.duration) * 100);
         const endPct = Math.min(100, (skip.interval.endTime / message.duration) * 100);
         const widthPct = Math.max(1, endPct - startPct);
-
         const isOP = skip.skipType === 'op';
         const blockColor = isOP ? '#FFD345' : '#E67E22';
         const labelText = isOP ? 'INTRO' : 'OUTRO';
@@ -1316,7 +1019,6 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     }
   }
 
-  // --- NEW MANGA LISTENER ---
   if (message.action === "LIVE_MANGA_PROGRESS") {
     const progressBar = document.getElementById('video-progress-bar');
     const progressText = document.getElementById('video-progress-text');
@@ -1360,8 +1062,7 @@ async function handleAutoDetectConfirm() {
     await apiRequest(mutation, { mediaId: detectedMedia.id, progress: detectedEpisode, status: newStatus });
     btn.textContent = 'Done!';
     setTimeout(() => {
-      document.getElementById('autodetect-view').classList.add('hidden');
-      loadAnimeList(); 
+      loadAnimeList(true); 
       btn.disabled = false;
       btn.textContent = 'Update Progress';
     }, 1000);
@@ -1370,10 +1071,6 @@ async function handleAutoDetectConfirm() {
     btn.disabled = false;
   }
 }
-
-// ==========================================
-// 📺 CORE ANIME LIST RENDERER
-// ==========================================
 
 function getTodayFuzzy() {
   const d = new Date();
@@ -1418,8 +1115,8 @@ function getTabBadgeHtml(dayIndex, filterType) {
     }
   });
 
-  if (unwatchedCount > 0) return `<div class="tab-badge">${unwatchedCount}</div>`;
-  return `<div class="tab-badge check">✓</div>`; 
+  if (unwatchedCount > 0) return `<div class="tab-badge dot"></div>`;
+  return `<div class="tab-badge check dot"></div>`; 
 }
 
 function renderDayTabs(filterType) {
@@ -1489,11 +1186,11 @@ function renderSkeleton() {
   let html = '';
   for(let i=0; i<5; i++) {
     html += `
-      <div class="skeleton-item shimmer">
-        <div class="skeleton-img"></div>
-        <div class="skeleton-text">
-          <div class="skeleton-line"></div>
-          <div class="skeleton-line short"></div>
+      <div class="skeleton-item shimmer" style="display:flex; gap:10px; margin-bottom:8px; padding:10px; border-radius:10px; background:rgba(255,255,255,0.03);">
+        <div class="skeleton-img" style="width:48px; height:68px; border-radius:6px; background:#111a26;"></div>
+        <div class="skeleton-text" style="flex:1; display:flex; flex-direction:column; gap:8px; justify-content:center;">
+          <div class="skeleton-line" style="height:12px; background:#111a26; border-radius:4px;"></div>
+          <div class="skeleton-line short" style="height:12px; background:#111a26; border-radius:4px; width:50%;"></div>
         </div>
       </div>`;
   }
@@ -1501,19 +1198,10 @@ function renderSkeleton() {
 }
 
 async function loadAnimeList(silent = false) {
-  document.getElementById('main-view').classList.remove('hidden'); 
-  document.getElementById('search-input').classList.remove('hidden');
+  window.showAppView('main-view', true);
   
-  // ✅ SURGICAL FIX: Bring the header back
   const headerEl = document.querySelector('.header');
   if (headerEl) headerEl.classList.remove('hidden');
-
-  const adView = document.getElementById('autodetect-view');
-  const wlView = document.getElementById('whitelist-view');
-  const setView = document.getElementById('settings-view');
-  if (adView) adView.classList.add('hidden');
-  if (wlView) wlView.classList.add('hidden');
-  if (setView) setView.classList.add('hidden');
 
   const filter = currentFilter; 
   let query, variables;
@@ -1560,16 +1248,13 @@ async function loadAnimeList(silent = false) {
     `;
     variables = { season: next.season, seasonYear: next.year };
   } else {
-    // HYBRID API ROUTER
     const apiStatus = (filter === 'SCHEDULE' && currentMode === 'ANIME') ? 'CURRENT' : filter;
-    const apiType = currentMode; // 'ANIME' or 'MANGA'
+    const apiType = currentMode; 
     
-    // Dynamically request chapters vs episodes based on mode, NOW INCLUDING idMal
     const mediaFields = currentMode === 'ANIME' 
       ? `id idMal status title { romaji english } coverImage { medium large } episodes nextAiringEpisode { airingAt timeUntilAiring episode }`
       : `id idMal status title { romaji english } coverImage { medium large } chapters`;
 
-    // Sort by UPDATED_TIME_DESC so recently read manga stack at the top!
     query = `
       query ($userId: Int, $status: MediaListStatus) {
         MediaListCollection(userId: $userId, type: ${apiType}, status: $status, sort: UPDATED_TIME_DESC) {
@@ -1605,6 +1290,22 @@ async function loadAnimeList(silent = false) {
       if (lists.length > 0 && lists[0].entries) animeArray = lists[0].entries;
     }
 
+    if (userId) {
+      try {
+        const supabaseUrl = `${window.SUPABASE_URL || SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&select=media_id,source_url`;
+        const otgRes = await fetch(supabaseUrl, { headers: { 'apikey': window.SUPABASE_KEY || SUPABASE_KEY, 'Authorization': `Bearer ${window.SUPABASE_KEY || SUPABASE_KEY}` } });
+        const otgData = await otgRes.json();
+        
+        if (otgData && otgData.length) {
+          const urlMap = {};
+          otgData.forEach(save => { if (save.source_url) urlMap[save.media_id] = save.source_url; });
+          animeArray.forEach(entry => {
+            if (urlMap[entry.media.id]) entry.source_url = urlMap[entry.media.id];
+          });
+        }
+      } catch (e) { console.error("OTG URL Fetch Error", e); }
+    }
+
     chrome.storage.local.set({ cachedList_data: animeArray, cachedList_filter: filter });
 
     if (filter === 'CURRENT' || filter === 'SCHEDULE') updateUnwatchedBadge(animeArray);
@@ -1635,21 +1336,24 @@ function formatCountdown(seconds) {
 }
 
 function renderAnimeList(entries) {
-  // ✅ SURGICAL FIX: Inject Grid View CSS explicitly to position the badge below the episode tracker
   if (!document.getElementById('shiinah-badge-fix')) {
     const style = document.createElement('style');
     style.id = 'shiinah-badge-fix';
     style.textContent = `
-      .grid-view .quick-add-btn, 
-      .grid-layout .quick-add-btn,
-      [class*="grid"] .quick-add-btn {
+      .grid-layout .action-buttons-container {
         position: absolute !important;
-        top: 28px !important; /* Positions it right below the Ep tracker */
-        left: 8px !important;
-        right: auto !important;
-        bottom: auto !important;
+        top: 28px !important; 
+        left: 6px !important;
         z-index: 50 !important;
+        display: flex;
+        gap: 4px;
+      }
+      .grid-layout .quick-add-btn, .grid-layout .resume-btn {
+        position: static !important;
         padding: 2px 6px !important;
+        height: 20px !important;
+        min-width: 20px !important;
+        border-radius: 10px !important;
         font-size: 10px !important;
         background: rgba(11, 17, 25, 0.85) !important;
         backdrop-filter: blur(2px);
@@ -1667,7 +1371,6 @@ function renderAnimeList(entries) {
     return;
   }
 
-  // Fetch the background-generated conflict cache
   chrome.storage.local.get(['desync_cache'], (res) => {
     const desyncCache = res.desync_cache || {};
 
@@ -1696,22 +1399,36 @@ function renderAnimeList(entries) {
 
       const item = document.createElement('div');
       item.className = 'anime-list-item animated-view';
-      item.style.position = 'relative'; // Ensure absolute children anchor correctly
+      item.style.position = 'relative'; 
       item.setAttribute('data-title', `${media.title.romaji.toLowerCase()} ${media.title.english ? media.title.english.toLowerCase() : ''}`);
 
       let quickActionHtml = '';
       if (entry.status !== 'CURRENT') {
-        quickActionHtml = `<button class="quick-add-btn">Add</button>`;
-      } else if (maxAired > 0 && progress < maxAired) {
-        const remainingAmount = maxAired - progress;
         quickActionHtml = `
-          <div class="quick-add-btn" style="background: rgba(61,180,242,0.15); border: 1px solid var(--anilist-color, #3db4f2); color: var(--anilist-color, #3db4f2); font-size: 11px; font-weight: 900; padding: 4px 8px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.5); pointer-events: none; z-index: 50; display: flex; align-items: center; justify-content: center;">
-            ${remainingAmount}
-          </div>
+          <button class="ghost-btn quick-add-btn" title="Add to List">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          </button>`;
+      } else if (maxAired > 0 && progress < maxAired) {
+        quickActionHtml = `
+          <button class="ghost-btn quick-add-btn" title="Increment Progress">
+            <span style="font-size: 13px; font-weight: bold;">+1</span>
+          </button>
         `;
       }
 
-      // ✅ FEATURE 1: Render the Red Warning Icon if desynced
+      let resumeBtnHtml = '';
+      if (entry.source_url) {
+          const icon = currentMode === 'MANGA' ? 
+              `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>` : 
+              `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+          
+          resumeBtnHtml = `
+              <button class="ghost-btn resume-btn" data-url="${entry.source_url}" title="Resume ${currentMode === 'MANGA' ? 'Reading' : 'Watching'}">
+                  ${icon}
+              </button>
+          `;
+      }
+
       let desyncAlertHtml = '';
       if (desyncCache[media.id]) {
         desyncAlertHtml = `<div class="desync-warning-icon" data-id="${media.id}" style="position: absolute; top: -5px; left: -5px; background: #e74c3c; color: #fff; border: 2px solid #0b1119; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.8); z-index: 60;" title="Sync Conflict! Click to resolve.">!</div>`;
@@ -1719,17 +1436,20 @@ function renderAnimeList(entries) {
 
       item.innerHTML = `
         ${desyncAlertHtml}
-        <img src="${media.coverImage.medium}" style="width: 40px; height: 55px; object-fit: cover; border-radius: 4px; margin-right: 10px;">
+        <img src="${media.coverImage.medium}" style="width: 48px; height: 68px; object-fit: cover; border-radius: 6px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
         <div style="flex-grow: 1;">
-          <div class="anime-title-text" style="font-weight: bold; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;">
+          <div class="anime-title-text" style="font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;">
             ${media.title.romaji}
           </div>
-          <div class="progress-text" style="font-size: 12px; opacity: 0.8;">
+          <div class="progress-text" style="font-size: 11px; color: #9fadbd;">
             ${unit}: ${progress} / ${totalMax}
           </div>
           ${countdownHtml}
         </div>
-        ${quickActionHtml}
+        <div class="action-buttons-container" style="display: flex; gap: 4px;">
+          ${resumeBtnHtml}
+          ${quickActionHtml}
+        </div>
       `;
 
       const titleEl = item.querySelector('.anime-title-text');
@@ -1737,11 +1457,9 @@ function renderAnimeList(entries) {
       titleEl.addEventListener('mouseleave', () => titleEl.textContent = media.title.romaji);
 
       item.addEventListener('click', (e) => {
-        // Prevent opening the detail modal if they click the warning icon
-        if (!e.target.classList.contains('desync-warning-icon')) openDetailView(entry);
+        if (!e.target.classList.contains('desync-warning-icon') && !e.target.closest('.action-buttons-container')) openDetailView(entry);
       });
 
-      // ✅ FEATURE 1: Handle Warning Icon Click
       const warningIcon = item.querySelector('.desync-warning-icon');
       if (warningIcon) {
         warningIcon.addEventListener('click', (e) => {
@@ -1751,12 +1469,29 @@ function renderAnimeList(entries) {
         });
       }
 
+      const quickBtn = item.querySelector('.quick-add-btn');
+      if (quickBtn) {
+        quickBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (entry.status !== 'CURRENT') quickUpdateStatus(media.id, 'CURRENT', quickBtn);
+          else handleQuickPlusOneClick(entry, quickBtn, item.querySelector('.progress-text'));
+        });
+      }
+
+      const resumeBtn = item.querySelector('.resume-btn');
+      if (resumeBtn) {
+          resumeBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const targetUrl = e.currentTarget.getAttribute('data-url');
+              if (targetUrl) chrome.tabs.create({ url: targetUrl });
+          });
+      }
+
       container.appendChild(item);
     });
-  }); // <-- End of storage get wrap
+  }); 
 }
 
-// ✅ FEATURE 1: Modal Logic to resolve the discrepancy
 function openDesyncModal(conflictData) {
   const modal = document.getElementById('desync-modal');
   const titleEl = document.getElementById('desync-title');
@@ -1770,13 +1505,11 @@ function openDesyncModal(conflictData) {
 
   modal.classList.remove('hidden');
 
-  // If user trusts AniList, Overwrite MAL
   alBtn.onclick = () => {
     alBtn.textContent = "Syncing...";
     chrome.storage.local.get(['malToken'], async (res) => {
       if (res.malToken) {
         chrome.runtime.sendMessage({ action: "SAVE_ANIME_SCORE", mediaId: conflictData.malId, score: -1, isMalOnly: true, overrideProgress: conflictData.alProgress });
-        // NOTE: Uses the existing MAL update route in background.js via Mal Api Put
         await fetch(`https://api.myanimelist.net/v2/anime/${conflictData.malId}/my_list_status`, {
           method: 'PUT',
           headers: { 'Authorization': `Bearer ${res.malToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1787,7 +1520,6 @@ function openDesyncModal(conflictData) {
     });
   };
 
-  // If user trusts MAL, Overwrite AniList
   malBtn.onclick = () => {
     malBtn.textContent = "Syncing...";
     chrome.storage.local.get(['anilistToken'], async (res) => {
@@ -1811,23 +1543,19 @@ function openDesyncModal(conflictData) {
       delete cache[mediaId];
       chrome.storage.local.set({ desync_cache: cache, trigger_dom_refresh: Date.now() }, () => {
         modal.classList.add('hidden');
-        loadAnimeList(true); // Redraw the UI
+        loadAnimeList(true); 
       });
     });
   }
 }
-
-// ==========================================
-// ✏️ UPDATING & DETAIL VIEWS
-// ==========================================
 
 function handleQuickPlusOneClick(entry, btnElement, progressTextElement) {
   const media = entry.media;
   const maxEpisodes = media.episodes || '?';
   
   entry.progress += 1;
-  btnElement.textContent = `+1`; 
-  if (progressTextElement) progressTextElement.textContent = `Ep: ${entry.progress} / ${maxEpisodes}`;
+  btnElement.innerHTML = `<span style="font-size: 13px; font-weight: bold;">+1</span>`; 
+  if (progressTextElement) progressTextElement.textContent = `${currentMode === 'ANIME' ? 'Ep' : 'Ch'}: ${entry.progress} / ${maxEpisodes}`;
 
   let newStatus = 'CURRENT';
   let startedAt = undefined;
@@ -1863,14 +1591,14 @@ function handleQuickPlusOneClick(entry, btnElement, progressTextElement) {
       btnElement.disabled = false;
       loadAnimeList(true); 
     } catch (error) {
-      btnElement.textContent = 'Error';
+      btnElement.textContent = 'Err';
       btnElement.disabled = false;
     }
   }, 800); 
 }
 
 async function quickUpdateStatus(mediaId, newStatus, btnElement) {
-  btnElement.textContent = '...';
+  btnElement.innerHTML = '...';
   btnElement.disabled = true;
   const mutation = `mutation ($mediaId: Int, $status: MediaListStatus) { SaveMediaListEntry (mediaId: $mediaId, status: $status) { id } }`;
   try {
@@ -1878,7 +1606,7 @@ async function quickUpdateStatus(mediaId, newStatus, btnElement) {
     if (response.errors) throw new Error(JSON.stringify(response.errors));
     loadAnimeList(true); 
   } catch (error) {
-    btnElement.textContent = 'Add';
+    btnElement.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
     btnElement.disabled = false;
   }
 }
@@ -1888,14 +1616,18 @@ function openDetailView(entry) {
   document.getElementById('detail-image').src = entry.media.coverImage.large;
   document.getElementById('anime-title').textContent = entry.media.title.romaji;
   document.getElementById('episode-input').value = entry.progress || 0;
-  document.getElementById('total-episodes').textContent = `/ ${entry.media.episodes || '?'}`;
+  document.getElementById('total-episodes').textContent = `/ ${entry.media.episodes || entry.media.chapters || '?'}`;
   document.getElementById('score-input').value = entry.score || '';
   
   const statusSelect = document.getElementById('status-select');
   statusSelect.value = entry.status || 'CURRENT';
 
-  document.getElementById('main-view').classList.add('hidden');
-  document.getElementById('detail-view').classList.remove('hidden');
+  const bindInput = document.getElementById('bind-id-input');
+  if (bindInput) {
+    bindInput.value = entry.media.id > 0 ? entry.media.id : (entry.media.idMal || '');
+  }
+
+  window.showAppView('detail-view', false);
   document.getElementById('save-btn').textContent = 'Save Update';
   
   const hideToggle = document.getElementById('hide-title-toggle');
@@ -1949,8 +1681,6 @@ async function saveAnimeUpdate() {
     } else {
       saveBtn.textContent = 'Saved!';
       setTimeout(() => {
-        document.getElementById('detail-view').classList.add('hidden');
-        document.getElementById('main-view').classList.remove('hidden');
         loadAnimeList(true); 
         saveBtn.disabled = false;
       }, 1000);
@@ -1961,18 +1691,13 @@ async function saveAnimeUpdate() {
   }
 }
 
-// ==========================================
-// 🚧 UNFINISHED (OTG) VIEW LOGIC
-// ==========================================
-
 async function loadUnfinishedList() {
   const container = document.getElementById('anime-list');
   renderSkeleton(); 
 
   try {
-    // 1. Fetch from Supabase (now includes platform!)
-    const supabaseUrl = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&select=*,custom_title,platform&order=updated_at.desc`;
-    const res = await fetch(supabaseUrl, { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
+    const supabaseUrl = `${window.SUPABASE_URL || SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${userId}&select=*,custom_title,platform&order=updated_at.desc`;
+    const res = await fetch(supabaseUrl, { headers: { 'apikey': window.SUPABASE_KEY || SUPABASE_KEY, 'Authorization': `Bearer ${window.SUPABASE_KEY || SUPABASE_KEY}` } });
     const otgSaves = await res.json();
 
     if (!otgSaves || otgSaves.length === 0) {
@@ -1980,20 +1705,17 @@ async function loadUnfinishedList() {
       return;
     }
 
-    // 2. Separate by Platform
     const aniListIds = [...new Set(otgSaves.filter(s => s.platform === 'ANILIST' || !s.platform).map(s => s.media_id).filter(id => id > 0))];
     const malIds = [...new Set(otgSaves.filter(s => s.platform === 'MAL').map(s => s.media_id))];
     
     let fetchedMedia = [];
 
-    // 3. Fetch from AniList
     if (aniListIds.length > 0) {
       const query = `query ($idIn: [Int]) { Page(page: 1, perPage: 50) { media(id_in: $idIn, type: ${currentMode}) { id title { romaji english } coverImage { medium large } episodes chapters mediaListEntry { progress status score } } } }`;
       const aniRes = await apiRequest(query, { idIn: aniListIds });
       if (aniRes.data?.Page?.media) fetchedMedia.push(...aniRes.data.Page.media.map(m => ({ ...m, platform: 'ANILIST' })));
     }
 
-    // 4. Fetch from MAL
     const storage = await chrome.storage.local.get(['malToken']);
     if (malIds.length > 0 && storage.malToken) {
       for (const mId of malIds) {
@@ -2018,7 +1740,6 @@ async function loadUnfinishedList() {
       }
     }
 
-    // 5. Merge Data
     const mergedList = otgSaves.map(save => {
       if (save.platform === 'CUSTOM' || save.media_id < 0) {
         return {
@@ -2055,14 +1776,12 @@ function renderUnfinishedList(entries) {
   entries.forEach(entry => {
     const media = entry.media;
     
-    // DYNAMIC TERMINOLOGY
     const isManga = currentMode === 'MANGA';
     const unit = isManga ? 'Chapter' : 'Episode';
     const actionText = isManga ? '▶ Read' : '▶ Watch';
     let progressString = '';
 
     if (isManga) {
-      // Manga Progress Formatting (Scroll % or Pages)
       if (entry.playback_time === 0) {
         progressString = 'Left off at: Auto-Saved URL';
       } else if (entry.playback_time <= 100 && entry.playback_time % 1 !== 0) {
@@ -2071,7 +1790,6 @@ function renderUnfinishedList(entries) {
         progressString = `Left off at: Page ${Math.floor(entry.playback_time)}`;
       }
     } else {
-      // Anime Progress Formatting (MM:SS)
       const mins = Math.floor(entry.playback_time / 60);
       const secs = Math.floor(entry.playback_time % 60).toString().padStart(2, '0');
       progressString = `Left off at: ${mins}:${secs}`;
@@ -2082,24 +1800,22 @@ function renderUnfinishedList(entries) {
     item.setAttribute('data-title', `${media.title.romaji.toLowerCase()} ${media.title.english ? media.title.english.toLowerCase() : ''}`);
 
     const watchBtnHtml = entry.source_url ? `
-      <button class="otg-watch-btn" data-url="${entry.source_url}" 
-              style="background: transparent; color: var(--anilist-color); border: 1px solid var(--anilist-color); padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; width: 100%;">
+      <button class="otg-watch-btn secondary-btn" data-url="${entry.source_url}" style="width: 100%; border-color: var(--anilist-color); color: var(--anilist-color); font-size: 11px;">
         ${actionText}
       </button>
     ` : '';
 
     item.innerHTML = `
-      <img src="${media.coverImage.medium}" style="width: 40px; height: 55px; object-fit: cover; border-radius: 4px; margin-right: 10px;">
+      <img src="${media.coverImage.medium}" style="width: 48px; height: 68px; object-fit: cover; border-radius: 6px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
       <div style="flex-grow: 1;">
-        <div class="anime-title-text" style="font-weight: bold; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;">
+        <div class="anime-title-text" style="font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;">
           ${media.title.romaji}
         </div>
-        <div style="font-size: 12px; color: #E5C07B; margin-top: 2px;">Tracking ${unit} ${entry.episode}</div>
-        <div style="font-size: 11px; color: #9fadbd; font-weight: bold;">${progressString}</div>
+        <div style="font-size: 11px; color: #E5C07B; margin-top: 2px;">Tracking ${unit} ${entry.episode}</div>
+        <div style="font-size: 10px; color: #9fadbd; font-weight: bold;">${progressString}</div>
       </div>
       <div style="display: flex; flex-direction: column; gap: 6px; min-width: 75px;">
-        <button class="otg-finish-btn" data-media-id="${entry.media_id}" data-ep="${entry.episode}" 
-                style="background: transparent; color: #4cca51; border: 1px solid #4cca51; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; width: 100%;">
+        <button class="otg-finish-btn secondary-btn" data-media-id="${entry.media_id}" data-ep="${entry.episode}" style="width: 100%; border-color: #4cca51; color: #4cca51; font-size: 11px;">
           ✓ Finish
         </button>
         ${watchBtnHtml}
@@ -2136,7 +1852,7 @@ function renderUnfinishedList(entries) {
           if (container.children.length === 0) container.innerHTML = '<p class="placeholder-text">All caught up!</p>';
         }, 300);
       } else {
-        e.target.textContent = 'Error';
+        e.target.textContent = 'Err';
         e.target.style.borderColor = '#e74c3c';
         e.target.style.color = '#e74c3c';
       }
@@ -2156,8 +1872,8 @@ function renderUnfinishedList(entries) {
 
 async function deleteManualOtgSave(uId, mId, ep) {
   try {
-    const url = `${SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${uId}&media_id=eq.${mId}&episode=eq.${ep}`;
-    const res = await fetch(url, { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
+    const url = `${window.SUPABASE_URL || SUPABASE_URL}/rest/v1/otg_saves?anilist_user_id=eq.${uId}&media_id=eq.${mId}&episode=eq.${ep}`;
+    const res = await fetch(url, { method: 'DELETE', headers: { 'apikey': window.SUPABASE_KEY || SUPABASE_KEY, 'Authorization': `Bearer ${window.SUPABASE_KEY || SUPABASE_KEY}` } });
     return res.ok;
   } catch (error) { return false; }
 }

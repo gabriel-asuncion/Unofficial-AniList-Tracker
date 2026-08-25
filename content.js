@@ -68,8 +68,8 @@ chrome.storage.local.get(['whitelistedDomains', 'trackingThreshold', 'autoSkipEn
       sendResponse({ success: true });
     }
     else if (request.action === "GET_ACTIVE_SKIP_TIER") {
-  sendResponse({ 
-    tierText: typeof activeSkipTier !== 'undefined' && activeSkipTier ? activeSkipTier : "Detecting..." 
+      sendResponse({ 
+        tierText: typeof activeSkipTier !== 'undefined' && activeSkipTier ? activeSkipTier : "Detecting..." 
       });
     } else {
       sendResponse({ success: false });

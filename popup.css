@@ -1,7 +1,7 @@
 /* popup.css */
 body {
-  background-color: #0b1622; /* AniList Dark Background */
-  color: #9fadbd; /* AniList Subtext */
+  background-color: #0b1622;
+  color: #9fadbd;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   width: 340px; 
   min-height: 480px;
@@ -11,35 +11,30 @@ body {
   position: relative;
 }
 
-/* --- MINIMALIST SCROLLBAR --- */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #4a627a; /* Lighter contrast color */
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #3db4f2;
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2b3a4a; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3db4f2; }
 
 h1, h2, h3, h4 { margin: 0 0 10px 0; color: #ffffff; }
 
 button {
-  border: none; border-radius: 4px; cursor: pointer;
-  font-weight: bold; transition: background-color 0.1s, color 0.1s;
+  border: none; border-radius: 6px; cursor: pointer;
+  font-weight: bold; transition: background-color 0.2s, color 0.2s, transform 0.1s;
 }
+button:active { transform: scale(0.97); }
 
-/* AniList Blue Primary */
-.primary-btn { background-color: #3db4f2; color: #ffffff; padding: 10px 15px; width: 100%; }
+.primary-btn { background-color: #3db4f2; color: #ffffff; padding: 12px 15px; width: 100%; border-radius: 8px; }
 .primary-btn:hover { background-color: #2c9ad1; }
 
-.secondary-btn { background-color: transparent; color: #9fadbd; border: 1px solid #9fadbd; padding: 5px 10px; }
-.secondary-btn:hover { background-color: #3db4f2; color: #ffffff; border-color: #3db4f2; }
+.secondary-btn { background-color: rgba(255, 255, 255, 0.05); color: #9fadbd; padding: 8px 12px; border-radius: 8px; }
+.secondary-btn:hover { background-color: rgba(255, 255, 255, 0.1); color: #ffffff; }
+
+.ghost-btn { 
+  background: transparent; color: #9fadbd; display: flex; align-items: center; 
+  justify-content: center; width: 32px; height: 32px; border-radius: 50%; transition: 0.2s; 
+}
+.ghost-btn:hover { background: rgba(61,180,242,0.15); color: #3db4f2; }
 
 #login-view {
   display: flex; flex-direction: column; justify-content: center;
@@ -49,449 +44,102 @@ button {
 .login-subtitle { font-size: 13px; opacity: 0.8; margin-bottom: 25px; }
 
 select, input {
-  background-color: #151f2e; color: #9fadbd; border: 1px solid #2b3a4a;
-  padding: 5px; border-radius: 4px; width: 100%; margin-top: 5px; box-sizing: border-box;
+  background-color: #151f2e; color: #ffffff; border: none; outline: none;
+  padding: 10px 12px; border-radius: 8px; width: 100%; margin-top: 5px; box-sizing: border-box;
+  transition: background-color 0.2s;
 }
+select:focus, input:focus { background-color: #1a2636; box-shadow: 0 0 0 2px rgba(61, 180, 242, 0.3); }
 
-#search-input { margin-bottom: 15px; display: block; }
+#search-input { margin-bottom: 15px; display: block; font-size: 13px; }
 #search-input.hidden { display: none !important; }
 
 .header {
   display: flex; justify-content: space-between; align-items: center;
-  border-bottom: 1px solid #2b3a4a; padding-bottom: 10px; margin-bottom: 15px;
+  padding-bottom: 12px; margin-bottom: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 #user-profile {
   display: flex; align-items: center; gap: 10px; cursor: pointer;
-  padding: 4px 8px 4px 4px; border-radius: 6px; transition: background-color 0.2s;
+  padding: 6px; border-radius: 8px; transition: background-color 0.2s;
 }
-#user-profile:hover { background-color: #151f2e; }
-#user-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
+#user-profile:hover { background-color: rgba(255, 255, 255, 0.05); }
+#user-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
 .profile-text { display: flex; flex-direction: column; }
-#user-profile h2 { margin: 0; font-size: 15px; }
-#current-view-label { font-size: 11px; color: #3db4f2; margin-top: 2px; }
+#user-profile h2 { margin: 0; font-size: 15px; font-weight: 600; }
+#current-view-label { font-size: 11px; color: #3db4f2; margin-top: 2px; font-weight: 600; }
 
 #filter-dropdown {
-  position: absolute; top: 60px; left: 15px; background-color: #151f2e;
-  border: 1px solid #2b3a4a; border-radius: 6px; z-index: 100; width: 200px;
-  box-shadow: 0 8px 16px rgba(0,0,0,0.6); overflow: hidden;
+  position: absolute; top: 65px; left: 15px; background-color: #151f2e;
+  border-radius: 10px; z-index: 100; width: 220px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.8); overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05);
 }
-.filter-option { padding: 10px 12px; cursor: pointer; font-size: 13px; color: #9fadbd; transition: background-color 0.1s; }
-.filter-option:hover { background-color: #3db4f2; color: #ffffff; font-weight: bold; }
+.filter-option { padding: 12px 16px; cursor: pointer; font-size: 13px; color: #9fadbd; transition: 0.1s; }
+.filter-option:hover { background-color: rgba(61, 180, 242, 0.1); color: #3db4f2; font-weight: bold; }
 
 .day-tabs-container {
   display: flex; justify-content: space-between; margin-bottom: 15px;
-  background-color: #151f2e; border-radius: 6px; padding: 5px;
+  background-color: #111a26; border-radius: 12px; padding: 4px; gap: 2px;
 }
 .day-tab {
-  background: transparent; color: #9fadbd; border: none; padding: 5px 0;
-  flex: 1; text-align: center; border-radius: 4px; cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; font-weight: normal; position: relative;
+  background: transparent; color: #677b94; border: none; padding: 8px 0;
+  flex: 1; text-align: center; border-radius: 8px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; position: relative; transition: 0.2s;
 }
-.day-tab:hover { background-color: #2b3a4a; }
-.day-tab.active { background-color: #3db4f2; color: #ffffff; font-weight: bold; }
-.day-tab-name { font-size: 10px; margin-bottom: 2px; }
-.day-tab-date { font-size: 14px; }
+.day-tab:hover { color: #9fadbd; }
+.day-tab.active { background-color: #2b3a4a; color: #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+.day-tab-name { font-size: 10px; font-weight: bold; }
+.day-tab-date { display: none; }
 
-.tab-badge {
-  position: absolute; top: -4px; right: -2px; background-color: #e06c75; color: #ffffff;
-  font-size: 9px; font-weight: bold; border-radius: 50%; width: 14px; height: 14px;
-  display: flex; align-items: center; justify-content: center; border: 2px solid #151f2e;
+.tab-badge.dot {
+  position: absolute; top: 4px; right: 6px; background-color: #e06c75;
+  border-radius: 50%; width: 6px; height: 6px; box-shadow: 0 0 4px #e06c75;
 }
-.tab-badge.check { background-color: #4cca51; font-size: 10px; }
+.tab-badge.check.dot { background-color: #4cca51; box-shadow: 0 0 4px #4cca51; }
 
-#anime-list { max-height: 380px; overflow-y: auto; }
-.anime-list-item { display: flex; align-items: center; margin-bottom: 10px; cursor: pointer; padding: 5px; border-radius: 4px; }
-.anime-list-item:hover { background-color: #151f2e; }
-
-.quick-add-btn { background-color: #3db4f2; color: #ffffff; padding: 6px 10px; font-size: 14px; border-radius: 4px; margin-left: 10px; }
-.quick-add-btn:hover { background-color: #2c9ad1; }
-.quick-add-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-
-.placeholder-text { text-align: center; font-style: italic; opacity: 0.7; }
-
-/* Skeleton Loader */
-.skeleton-item { display: flex; gap: 10px; margin-bottom: 10px; padding: 5px; }
-.skeleton-img { width: 40px; height: 55px; border-radius: 4px; background: #151f2e; flex-shrink: 0; }
-.skeleton-text { flex-grow: 1; display: flex; flex-direction: column; gap: 8px; justify-content: center; }
-.skeleton-line { height: 12px; background: #151f2e; border-radius: 4px; }
-.skeleton-line.short { width: 50%; }
-.shimmer { 
-  animation: shimmer 1.5s infinite linear; 
-  background: linear-gradient(to right, #0b1622 4%, #151f2e 25%, #0b1622 36%); 
-  background-size: 1000px 100%; 
+#anime-list { max-height: 380px; overflow-y: auto; padding-right: 4px; }
+.anime-list-item { 
+  display: flex; align-items: center; margin-bottom: 8px; cursor: pointer; 
+  padding: 10px; border-radius: 10px; transition: 0.2s; gap: 12px;
 }
-@keyframes shimmer { 0% { background-position: -1000px 0; } 100% { background-position: 1000px 0; } }
+.anime-list-item:hover { background-color: rgba(255, 255, 255, 0.03); }
+.anime-list-item img { width: 48px; height: 68px; object-fit: cover; border-radius: 6px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
 
-.countdown-text { font-size: 11px; color: #3db4f2; margin-top: 3px; font-weight: bold; }
-.exact-air-time { font-size: 10px; color: #9fadbd; opacity: 0.8; margin-top: 1px; }
+.anime-title-text { font-weight: 600; font-size: 14px; color: #fff; margin-bottom: 4px; }
+.progress-text { font-size: 11px; color: #9fadbd; }
+.countdown-text { font-size: 11px; color: #3db4f2; margin-top: 4px; font-weight: bold; }
+.exact-air-time { display: none; }
 
-.detail-header { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; }
-#detail-image { width: 70px; height: 100px; object-fit: cover; border-radius: 6px; cursor: pointer; transition: transform 0.2s; }
-#detail-image:hover { transform: scale(1.05); }
+.placeholder-text { text-align: center; font-style: italic; opacity: 0.5; margin-top: 20px; font-size: 13px; }
 
-.update-form label { display: block; margin-bottom: 15px; color: #ffffff; }
-.episode-controls { display: flex; align-items: center; gap: 10px; }
-#save-btn { margin-top: 10px; }
-#back-btn { margin-bottom: 15px; }
+.svg-icon {
+  width: 18px; height: 18px; opacity: 0.8; transition: 0.2s;
+  filter: invert(70%) sepia(13%) saturate(399%) hue-rotate(174deg) brightness(89%) contrast(85%);
+}
+button:hover .svg-icon { opacity: 1; filter: invert(100%); }
+
+.detail-header { display: flex; align-items: flex-start; gap: 15px; margin-bottom: 20px; }
+#detail-image { width: 80px; height: 115px; object-fit: cover; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+.episode-controls input { font-size: 16px; font-weight: bold; text-align: center; }
 
 .hidden { display: none !important; }
+.toggle-switch-container { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.toggle-label { font-size: 12px; color: #9fadbd; font-weight: bold; }
+.toggle-switch-container input { display: none; }
+.toggle-slider { position: relative; width: 36px; height: 20px; background-color: #1a2636; border-radius: 20px; transition: .3s; }
+.toggle-slider:before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: #9fadbd; border-radius: 50%; transition: .3s; }
+.toggle-switch-container input:checked + .toggle-slider { background-color: #3db4f2; }
+.toggle-switch-container input:checked + .toggle-slider:before { transform: translateX(16px); background-color: #fff; }
 
-#fullscreen-modal {
-  position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(11, 22, 34, 0.95);
-  z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer;
-}
-#modal-img { max-width: 90%; max-height: 85%; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-.modal-close-text { margin-top: 15px; font-size: 12px; opacity: 0.7; }
-
-#autodetect-view { display: flex; flex-direction: column; gap: 15px; padding: 10px 0; }
-.autodetect-header { color: #3db4f2; font-size: 14px; text-align: center; margin-bottom: 5px; }
-.autodetect-card { display: flex; background-color: #151f2e; padding: 10px; border-radius: 8px; border: 1px solid #3db4f2; align-items: center; gap: 15px; }
-#autodetect-img { width: 50px; height: 70px; object-fit: cover; border-radius: 4px; }
-.autodetect-info { display: flex; flex-direction: column; gap: 5px; }
-#autodetect-title { font-weight: bold; font-size: 14px; color: #ffffff; }
-#autodetect-ep { font-size: 13px; color: #9fadbd; }
-.autodetect-actions { display: flex; flex-direction: column; gap: 10px; }
-#autodetect-cancel-btn { width: 100%; border-color: #2b3a4a; color: #9fadbd; }
-#autodetect-cancel-btn:hover { background-color: #2b3a4a; }
-
-#video-progress-container {
-  width: 100%; background-color: #151f2e; border: 1px solid #2b3a4a;
-  border-radius: 4px; height: 16px; position: relative; margin-bottom: 10px; overflow: hidden;
-}
-#video-progress-bar { height: 100%; background-color: #4cca51; width: 0%; transition: width 0.5s linear; }
-#video-progress-text {
-  position: absolute; top: 0; left: 0; width: 100%; text-align: center;
-  font-size: 10px; line-height: 14px; color: #ffffff; font-weight: bold; text-shadow: 1px 1px 2px #000; pointer-events: none;
+.settings-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
-/* --- NEW: XP Progress Bar Styles --- */
-#xp-progress-wrapper {
-  margin: 15px 0;
-  text-align: center;
-}
-#xp-progress-container {
-  width: 100%;
-  background-color: #151f2e;
-  border: 1px solid #2b3a4a;
-  border-radius: 8px;
-  height: 20px;
-  position: relative;
-  overflow: hidden;
-  cursor: help;
-}
-#xp-progress-bar {
-  height: 100%;
-  background-color: #E5C07B;
-  width: 0%;
-  transition: width 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-#xp-hover-text {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  text-align: center;
-  font-size: 11px;
-  line-height: 20px;
-  color: #fff;
-  font-weight: bold;
-  text-shadow: 1px 1px 2px #000;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-#xp-progress-container:hover #xp-hover-text {
-  opacity: 1;
-}
-
-/* --- ACHIEVEMENT UI STYLES --- */
-.achieve-card {
-  display: flex; gap: 12px; align-items: center; padding: 10px;
-  border-radius: 6px; border: 1px solid #1a2636; background: #0b1119;
-  text-align: left;
-}
-.achieve-card.locked { opacity: 0.4; filter: grayscale(100%); }
-.achieve-icon { font-size: 24px; flex-shrink: 0; }
-.achieve-info { flex-grow: 1; display: flex; flex-direction: column; gap: 4px; }
-.achieve-title { font-weight: bold; font-size: 13px; color: #fff; }
-.achieve-desc { font-size: 11px; color: #9fadbd; line-height: 1.2; }
-
-/* Progress Bar inside Card */
-.achieve-prog-track { 
-  width: 100%; height: 12px; background: #151f2e; border-radius: 6px; 
-  position: relative; overflow: hidden; margin-top: 2px; border: 1px solid #2b3a4a;
-}
-.achieve-prog-fill { height: 100%; background: #3db4f2; transition: width 0.3s; }
-.achieve-prog-text { 
-  position: absolute; top: 0; left: 0; width: 100%; text-align: center; 
-  font-size: 9px; line-height: 12px; color: #fff; font-weight: bold; 
-}
-
-/* --- NEW: PROFILE DASHBOARD STYLES --- */
-.stats-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px;
-}
-.stat-card {
-  background-color: #151f2e; border-radius: 8px; padding: 12px;
-  display: flex; align-items: center; gap: 12px; border: 1px solid #1a2636;
-}
-.stat-icon {
-  width: 32px; height: 32px; border-radius: 6px; display: flex;
-  align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;
-}
-.stat-info { display: flex; flex-direction: column; }
-.stat-value { color: #fff; font-weight: bold; font-size: 15px; line-height: 1.1; }
-.stat-label { color: #9fadbd; font-size: 11px; }
-
-/* CSS-Only Donut Chart */
 .chart-card {
-  background-color: #151f2e; border-radius: 8px; padding: 15px;
-  border: 1px solid #1a2636; margin-bottom: 15px; text-align: left;
-}
-.chart-header { display: flex; align-items: center; gap: 8px; color: #fff; font-weight: bold; font-size: 13px; margin-bottom: 15px; }
-.donut-container { display: flex; justify-content: center; margin-bottom: 15px; }
-.donut {
-  width: 120px; height: 120px; border-radius: 50%;
-  background: conic-gradient(#3db4f2 0% 100%); /* Replaced dynamically */
-  display: flex; align-items: center; justify-content: center;
-}
-.donut-inner {
-  width: 80px; height: 80px; background-color: #151f2e; border-radius: 50%;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-}
-.donut-total { color: #fff; font-weight: bold; font-size: 18px; line-height: 1; }
-.donut-label { color: #9fadbd; font-size: 10px; }
-
-/* Status Legend */
-.status-legend { display: flex; flex-direction: column; gap: 6px; }
-.legend-item { display: flex; justify-content: space-between; font-size: 12px; color: #fff; align-items: center;}
-.legend-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; display: inline-block; }
-
-/* Preferences & Formats (Bars) */
-.pref-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
-.pref-card {
-  background-color: #0b1119; border: 1px solid #1a2636; border-radius: 6px; padding: 10px;
-}
-.pref-name { color: #fff; font-weight: bold; font-size: 12px; margin-bottom: 4px; }
-.pref-count { color: #fff; font-weight: bold; font-size: 14px; margin-bottom: 6px; }
-.pref-bar-bg { width: 100%; height: 4px; background-color: #1a2636; border-radius: 2px; }
-.pref-bar-fill { height: 100%; background-color: #fff; border-radius: 2px; }
-
-.format-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px;}
-.format-item { display: flex; flex-direction: column; gap: 4px; }
-.format-header { display: flex; justify-content: space-between; font-size: 12px; color: #fff; font-weight: bold; }
-
-/* --- PREFERENCES TABS --- */
-.pref-header-top { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-.pref-tabs-container {
-  display: flex; background-color: #0b1119; border: 1px solid #1a2636;
-  border-radius: 6px; padding: 2px; margin-bottom: 10px;
-}
-.pref-tab {
-  flex: 1; text-align: center; padding: 6px 0; font-size: 11px;
-  color: #9fadbd; cursor: pointer; border-radius: 4px; transition: 0.2s ease;
-}
-.pref-tab:hover { color: #fff; }
-.pref-tab.active { background-color: #2b3a4a; color: #fff; font-weight: bold; }
-
-/* --- RECOMMENDATION VIEW STYLES --- */
-#recommendation-view {
-  display: flex; flex-direction: column; height: 100%;
-}
-.rec-card {
-  background-color: #151f2e; border-radius: 12px; border: 1px solid #1a2636;
-  display: flex; flex-direction: column; overflow: hidden; flex-grow: 1;
-  margin-bottom: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-}
-.rec-cover-container {
-  width: 100%; height: 200px; position: relative; overflow: hidden; flex-shrink: 0;
-}
-.rec-cover {
-  width: 100%; height: 100%; object-fit: cover; object-position: center 20%;
-}
-.rec-cover-fade {
-  position: absolute; bottom: 0; left: 0; width: 100%; height: 50%;
-  background: linear-gradient(to top, #151f2e 0%, transparent 100%);
-}
-.rec-info {
-  padding: 15px; display: flex; flex-direction: column; gap: 8px; flex-grow: 1; overflow: hidden;
-}
-.rec-title { font-weight: bold; font-size: 16px; color: #fff; line-height: 1.2; }
-.rec-alt-title { font-size: 11px; color: #9fadbd; font-style: italic; margin-bottom: 4px; }
-.rec-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-.rec-tag {
-  background-color: #2b3a4a; color: #3db4f2; font-size: 10px; font-weight: bold;
-  padding: 4px 8px; border-radius: 4px;
-}
-.rec-synopsis {
-  font-size: 12px; color: #9fadbd; line-height: 1.5; overflow-y: auto;
-  padding-right: 4px; flex-grow: 1;
-}
-#rec-next-btn {
-  background-color: #3db4f2; color: #fff; border: none; border-radius: 8px;
-  padding: 12px; font-weight: bold; font-size: 14px; cursor: pointer; transition: 0.2s;
-}
-#rec-next-btn:hover { background-color: #2c9ad1; }
-.rec-badge {
-  position: absolute; top: 10px; right: 10px; background: #E5C07B; color: #000;
-  font-size: 10px; font-weight: bold; padding: 4px 8px; border-radius: 12px; z-index: 2;
+  background-color: #111a26; border-radius: 12px; padding: 15px; margin-bottom: 15px;
 }
 
-/* --- UI/UX ENHANCEMENTS: SMOOTH TRANSITIONS --- */
-
-/* Apply this class to your main view wrappers in HTML later */
 .animated-view {
-  animation: fadeSlideIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-}
-
-@keyframes fadeSlideIn {
-  from { 
-    opacity: 0; 
-    transform: translateY(15px) scale(0.98); 
-  }
-  to { 
-    opacity: 1; 
-    transform: translateY(0) scale(1); 
-  }
-}
-
-/* Make dropdowns snap open cleanly */
-#filter-dropdown:not(.hidden) {
-  animation: dropDownOpen 0.2s ease-out forwards;
-  transform-origin: top left;
-}
-
-@keyframes dropDownOpen {
-  from { opacity: 0; transform: scaleY(0.8); }
-  to { opacity: 1; transform: scaleY(1); }
-}
-
-/* --- UI/UX ENHANCEMENTS: GRID VIEW TOGGLE --- */
-
-#anime-list.grid-layout {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  padding: 4px;
-}
-
-/* Transform the list container into a poster card */
-#anime-list.grid-layout .anime-list-item {
-  display: block; 
-  position: relative;
-  height: 150px;
-  padding: 0;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid #1a2636;
-  background-color: #0b1119;
-}
-
-/* 1. Full Cover Image with 10% Hover Zoom */
-#anime-list.grid-layout .anime-list-item img {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover;
-  margin: 0 !important;
-  border-radius: 0 !important;
-  z-index: 1;
-  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-#anime-list.grid-layout .anime-list-item:hover img {
-  transform: scale(1.1); /* Zooms 10% from the center */
-}
-
-/* 2. Black Gradient Overlay */
-#anime-list.grid-layout .anime-list-item::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  /* Dark at the bottom for the title, dark at the top for the pills */
-  background: linear-gradient(to top, rgba(0,0,0, 0.95) 0%, rgba(0,0,0, 0.2) 40%, rgba(0,0,0, 0.6) 100%);
-  z-index: 2;
-  pointer-events: none;
-}
-
-/* 3. Title: Bottom Middle, Max 2 Lines */
-#anime-list.grid-layout .anime-title-text {
-  position: absolute;
-  bottom: 8px;
-  left: 6px;
-  right: 6px;
-  z-index: 3;
-  white-space: normal !important;
-  display: -webkit-box;
-  -webkit-line-clamp: 2; /* Truncates overflow with ... */
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-align: center;
-  font-size: 11px !important;
-  line-height: 1.3;
-  text-shadow: 1px 1px 3px #000;
-  pointer-events: none;
-}
-
-/* 4. Episode Counter: Top Left Pill */
-#anime-list.grid-layout .progress-text {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 3;
-  background: rgba(11, 22, 34, 0.85);
-  color: #E5C07B;
-  padding: 3px 6px;
-  border-radius: 12px;
-  font-weight: bold;
-  font-size: 10px !important;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-  backdrop-filter: blur(2px);
-  pointer-events: none;
-}
-
-/* 5. Add / +1 Button: Top Right */
-#anime-list.grid-layout .quick-add-btn {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 4;
-  margin: 0 !important;
-  padding: 3px 8px !important;
-  height: auto;
-  border-radius: 12px !important;
-  font-size: 11px !important;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.6);
-}
-
-/* Hide the countdown texts in grid mode to save space */
-#anime-list.grid-layout .countdown-text,
-#anime-list.grid-layout .exact-air-time {
-  display: none;
-}
-:root {
-  /* Brand & Accent Colors */
-  --anilist-color: #3db4f2; /* Primary blue, synced to user profile */
-  --gold-color: #E5C07B;    /* Accent for levels, leaderboards, OTG */
-  --green-color: #4cca51;   /* Success, completed */
-  --red-color: #e74c3c;     /* Errors, dropped */
-
-  /* UI Element Colors */
-  --bg-primary: #0b1622;
-  --bg-secondary: #151f2e;
-  --border-color: #2b3a4a;
-  --anilist-color-bg: color-mix(in srgb, var(--anilist-color) 15%, transparent);
-}
-
-/* --- SMOOTH VIEW TRANSITIONS --- */
-/* Animates any view the moment the 'hidden' class is removed */
-#main-view:not(.hidden), 
-#profile-view:not(.hidden), 
-#settings-view:not(.hidden), 
-#recommendation-view:not(.hidden), 
-#detail-view:not(.hidden) {
   animation: popSlideIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
@@ -500,63 +148,19 @@ select, input {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* Ensure the search bar and toggle button align perfectly */
-#search-input,
-#layout-toggle-btn {
-  height: 36px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+#search-input, #layout-toggle-btn, #mode-toggle-btn, #settings-btn {
+  height: 38px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
 }
 
-/* --- UI ALIGNMENT FIXES --- */
-/* Force all header and utility buttons/inputs to share exact dimensions */
-#search-input,
-#layout-toggle-btn,
-#mode-toggle-btn,
-#settings-btn {
-  height: 36px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0; 
-}
+#anime-list.grid-layout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 4px; }
+#anime-list.grid-layout .anime-list-item { display: block; position: relative; height: 150px; padding: 0; border-radius: 8px; overflow: hidden; }
+#anime-list.grid-layout .anime-list-item img { position: absolute; inset: 0; width: 100% !important; height: 100% !important; border-radius: 0 !important; z-index: 1; }
+#anime-list.grid-layout .anime-list-item::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0, 0.9) 0%, transparent 50%); z-index: 2; }
+#anime-list.grid-layout .anime-title-text { position: absolute; bottom: 8px; left: 6px; right: 6px; z-index: 3; font-size: 11px !important; text-align: center; }
+#anime-list.grid-layout .progress-text { position: absolute; top: 6px; left: 6px; z-index: 3; background: rgba(0,0,0,0.7); padding: 2px 6px; border-radius: 8px; font-size: 10px; }
+#anime-list.grid-layout .ghost-btn { position: absolute; top: 6px; right: 6px; z-index: 4; background: rgba(0,0,0,0.7); }
+#anime-list.grid-layout .countdown-text, #anime-list.grid-layout .exact-air-time { display: none; }
 
-/* Specific fix for the search input to ensure text centers nicely */
-#search-input {
-  justify-content: flex-start;
-  padding: 0 12px;
+#xp-progress-container:hover #xp-hover-text {
+  opacity: 1 !important;
 }
-
-/* Custom Toggle Switch */
-.toggle-switch-container { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.toggle-label { font-size: 12px; color: #9fadbd; font-weight: bold; }
-.toggle-switch-container input { display: none; }
-.toggle-slider { position: relative; width: 36px; height: 20px; background-color: #2b3a4a; border-radius: 20px; transition: .3s; border: 1px solid #1a2636; }
-.toggle-slider:before { content: ""; position: absolute; height: 14px; width: 14px; left: 2px; bottom: 2px; background-color: #9fadbd; border-radius: 50%; transition: .3s; }
-.toggle-switch-container input:checked + .toggle-slider { background-color: #3db4f2; border-color: #3db4f2; }
-.toggle-switch-container input:checked + .toggle-slider:before { transform: translateX(16px); background-color: #fff; }
-
-/* Detail Form Input Cleanups */
-.update-form select, .update-form input {
-  background-color: #0b1119; color: #fff; border: 1px solid #1a2636;
-  padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box;
-  margin-top: 0; outline: none; transition: border-color 0.2s;
-}
-.update-form select:focus, .update-form input:focus { border-color: #3db4f2; }
-.update-form label { margin-bottom: 0; }
-
-/* Whitelist Manager Domain Toggle */
-.domain-type-toggle {
-  display: inline-flex; align-items: center; background: #1a2636; border-radius: 12px;
-  cursor: pointer; padding: 2px; width: 40px; position: relative; border: 1px solid #2b3a4a;
-  flex-shrink: 0; box-sizing: border-box; transition: background-color 0.3s;
-}
-.domain-type-indicator {
-  width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: bold; color: #fff; transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-.domain-type-toggle.anime .domain-type-indicator { background: #3db4f2; transform: translateX(0); }
-.domain-type-toggle.manga .domain-type-indicator { background: #E5C07B; transform: translateX(18px); }

@@ -102,8 +102,12 @@ async function loadUserLevel(currentUserId) {
         hoverText = `${Math.floor(currentMinutes).toLocaleString()} / ${Math.floor(nextLevelMins).toLocaleString()} mins`;
       }
 
-      document.getElementById('xp-progress-bar').style.width = `${pct}%`;
-      document.getElementById('xp-hover-text').textContent = hoverText;
+      // To this:
+      const progressBar = document.getElementById('xp-progress-bar');
+      if (progressBar) progressBar.style.width = `${pct}%`;
+
+      const hoverTextEl = document.getElementById('xp-hover-text');
+      if (hoverTextEl) hoverTextEl.textContent = hoverText;
     }
   } catch (e) { console.error("Failed to load XP", e); }
 }

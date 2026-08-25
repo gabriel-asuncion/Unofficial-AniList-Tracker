@@ -11,203 +11,224 @@
   <div id="login-view">
     <div class="login-content">
       <h1 class="login-title">AniList Update</h1>
-      <p class="login-subtitle">Your quick anime tracking companion.</p>
+      <p class="login-subtitle">Your minimal anime companion.</p>
       <button id="login-btn" class="primary-btn">Log In with AniList</button>
-      <button id="mal-login-btn" class="primary-btn" style="background-color: #2E51A2; margin-top: 10px;">Login with MyAnimeList</button>
+      <button id="mal-login-btn" class="primary-btn" style="background-color: #2E51A2; margin-top: 10px;">Login with MAL</button>
     </div>
   </div>
 
   <div id="app-view" class="hidden">
-    <div class="header">
-    <div id="mal-link-banner" class="hidden" style="background: rgba(231, 76, 60, 0.15); border: 1px solid #e74c3c; color: #fff; padding: 10px; margin: 10px 15px; border-radius: 6px; font-size: 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
-      <div>⚠️ <b>MAL Disconnected:</b> Cloud settings show you use MAL.</div>
-      <button id="banner-mal-link-btn" style="background: #e74c3c; color: #fff; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s;">Link Now</button>
+    <div id="mal-link-banner" class="hidden" style="background: rgba(231, 76, 60, 0.1); color: #fff; padding: 10px; margin-bottom: 15px; border-radius: 8px; font-size: 12px; display: flex; justify-content: space-between; align-items: center;">
+      <div>⚠️ <b>MAL Disconnected:</b> Check cloud settings.</div>
+      <button id="banner-mal-link-btn" style="background: #e74c3c; color: #fff; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-weight: bold;">Link Now</button>
     </div>
+
+    <div class="header">
       <div id="user-profile">
         <img id="user-avatar" src="" alt="Avatar">
         <div class="profile-text">
           <div style="display: flex; align-items: center; gap: 6px;">
-            <!-- NEW: Hidden by default, shows the selected badge -->
-            <img id="user-active-badge" src="" class="hidden" style="width: 16px; height: 16px; object-fit: contain;" title="Equipped Achievement">
-            
+            <img id="user-active-badge" src="" class="hidden" style="width: 14px; height: 14px;" title="Equipped Achievement">
             <h2 id="user-name">User</h2>
             <span id="user-level" style="background: #E5C07B; color: #0b1119; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 10px;">Lv. 1</span>
           </div>
           <div id="current-view-label">Schedule (My List) ▾</div>
         </div>
       </div>
-      <div style="display: flex; gap: 8px; align-items: stretch;">
-        <!-- NEW: Anime/Manga Mode Toggle -->
-        <button id="mode-toggle-btn" class="secondary-btn" title="Switch to Manga Mode" aria-label="Switch to Manga Mode" style="font-size: 16px;">📺</button>
-        <button id="settings-btn" class="secondary-btn" title="Settings" aria-label="Open Settings" style="font-size: 16px;">⚙️</button>
+      <div style="display: flex; gap: 8px;">
+        <button id="mode-toggle-btn" class="secondary-btn" title="Switch Mode">
+          <img id="mode-icon" src="icons/monitor.svg" class="svg-icon" alt="Mode">
+        </button>
+        <button id="settings-btn" class="secondary-btn" title="Settings">
+          <img src="icons/settings.svg" class="svg-icon" alt="Settings">
+        </button>
       </div>
     </div>
     
     <div id="filter-dropdown" class="hidden">
-      <div class="filter-option" data-value="SCHEDULE">Schedule (My List)</div>
-      <div class="filter-option" data-value="SCHEDULE_ALL">Schedule (All Airing)</div>
-      <div class="filter-option" data-value="CURRENT">Watching</div>
-      <div class="filter-option" data-value="PLANNING">Planning</div>
-      <div class="filter-option" data-value="UPCOMING">Upcoming (Next Season)</div>
-      
-      <!-- NEW: Unfinished OTG View -->
-      <div class="filter-option" data-value="UNFINISHED" style="border-top: 1px solid #2b3a4a; color: #3db4f2;">Unfinished (OTG)</div>
-      
-      <div class="filter-option" data-value="LEADERBOARD" style="border-top: 1px solid #2b3a4a; color: #E5C07B;">Global Leaderboard</div>
+      <!-- Options injected by JS -->
     </div>
 
     <!-- 1. AUTO-DETECT VIEW -->
-    <div id="autodetect-view" class="hidden">
-      <!-- DEBUG PROGRESS BAR -->
-      <div id="video-progress-container" title="Live video progress">
-        <div id="video-progress-bar"></div>
-        <div id="video-progress-text">Video Progress: 0.0%</div>
+    <div id="autodetect-view" class="hidden animated-view">
+      <div id="video-progress-container" style="background: #111a26; border-radius: 8px; height: 12px; position: relative; overflow: hidden; margin-bottom: 15px;">
+        <div id="video-progress-bar" style="height: 100%; background: #4cca51; width: 0%; transition: 0.5s linear;"></div>
+        <div id="video-progress-text" style="position: absolute; top: -1px; width: 100%; text-align: center; font-size: 9px; color: #fff; font-weight: bold;">0.0%</div>
       </div>
 
-      <h3 class="autodetect-header">We noticed you're watching...</h3>
-      <!-- NEW: SYNC BADGES CONTAINER -->
-      <div id="autodetect-badges" style="display: flex; gap: 8px; justify-content: center; margin-bottom: 10px;"></div>
+      <h3 class="autodetect-header" style="color: #3db4f2; font-size: 14px; text-align: center; margin-bottom: 10px;">Currently tracking...</h3>
+      <div id="autodetect-badges" style="display: flex; gap: 6px; justify-content: center; margin-bottom: 15px;"></div>
 
-      <div class="autodetect-card">
-        <img id="autodetect-img" src="" alt="Cover">
-        <div class="autodetect-info">
-          <div id="autodetect-title">Anime Title</div>
-          <div id="autodetect-ep">Episode X</div>
+      <div class="autodetect-card" style="display: flex; background: #111a26; padding: 12px; border-radius: 12px; gap: 15px;">
+        <img id="autodetect-img" src="" style="width: 50px; height: 75px; object-fit: cover; border-radius: 6px;">
+        <div style="display: flex; flex-direction: column; justify-content: center;">
+          <div id="autodetect-title" style="font-weight: bold; font-size: 14px; color: #fff; margin-bottom: 4px;">Title</div>
+          <div id="autodetect-ep" style="font-size: 12px; color: #E5C07B;">Episode X</div>
         </div>
       </div>
-      <div class="autodetect-actions">
+      
+      <div class="autodetect-actions" style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;">
         <button id="autodetect-confirm-btn" class="primary-btn hidden">Update Progress</button>
-        <button id="skip-intro-btn" class="secondary-btn" style="border-color: #E5C07B; color: #E5C07B;">⏭ Skip 1:30</button>
-        <button id="autodetect-cancel-btn" class="secondary-btn">View My Anime List</button>
+        <button id="skip-intro-btn" class="secondary-btn" style="color: #E5C07B;">⏭ Skip Intro/Outro</button>
+        <button id="autodetect-cancel-btn" class="secondary-btn" style="background: transparent;">Return to List</button>
       </div>
     </div>
 
     <!-- 2. WHITELIST VIEW -->
-    <div id="whitelist-view" class="hidden">
-      <!-- ✅ Added Yellow Warning Badge & Centered Layout -->
-      <h3 class="autodetect-header" style="color: #E5C07B; display: flex; align-items: center; justify-content: center; gap: 8px;">
-        <span style="background: #E5C07B; color: #0b1119; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 900;">!</span>
-        Action Required
-      </h3>
-      <div class="autodetect-card" style="flex-direction: column; text-align: center; gap: 8px; border-color: #E5C07B;">
-        <p style="font-size: 13px; margin: 0; color: #ffffff;">We noticed you are on</p>
-        <p style="font-size: 15px; margin: 0; color: #E5C07B; font-weight: bold;" id="whitelist-hostname"></p>
-        <p style="font-size: 11px; margin: 5px 0 0 0; opacity: 0.8;">Whitelist this site to enable background tracking.</p>
-      </div>
-      <div class="autodetect-actions" style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
-        <button id="whitelist-anime-btn" class="primary-btn" style="background-color: #3db4f2;">Whitelist as Anime Streaming Site</button>
-        <button id="whitelist-manga-btn" class="primary-btn" style="background-color: #3db4f2;">Whitelist as Manga Reading Site</button>
-        <button id="whitelist-cancel-btn" class="secondary-btn" style="margin-top: 4px;">Skip for now</button>
+    <div id="whitelist-view" class="hidden animated-view">
+      <div style="text-align: center; padding: 20px 0;">
+        <div style="font-size: 32px; margin-bottom: 10px;">⚠️</div>
+        <h3 style="color: #fff; font-size: 16px; margin-bottom: 5px;">Action Required</h3>
+        <p style="font-size: 13px; color: #9fadbd;">Enable tracking for:</p>
+        <p id="whitelist-hostname" style="font-size: 15px; color: #E5C07B; font-weight: bold; margin: 5px 0 20px 0;"></p>
+        
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button id="whitelist-anime-btn" class="primary-btn" style="background-color: #3db4f2;">Whitelist as Anime Site</button>
+          <button id="whitelist-manga-btn" class="primary-btn" style="background: #2b3a4a;">Whitelist as Manga Site</button>
+          <button id="whitelist-cancel-btn" class="secondary-btn" style="background: transparent; margin-top: 5px;">Skip for now</button>
+        </div>
       </div>
     </div>
 
-    <div id="settings-view" class="hidden">
+    <!-- 3. MAIN LIST VIEW -->
+    <div id="main-view" class="animated-view">
+      <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+        <input type="text" id="search-input" placeholder="Search your list..." class="hidden">
+        <button id="layout-toggle-btn" class="secondary-btn hidden" style="width: 38px;">🔲</button>
+      </div>
+      <div id="day-tabs" class="day-tabs-container hidden"></div>
+      <div id="anime-list"></div>
+    </div>
+    
+    <!-- 4. SETTINGS VIEW -->
+    <div id="settings-view" class="hidden animated-view">
       <button id="settings-back-btn" class="secondary-btn" style="margin-bottom: 15px;">← Back</button>
       <h3 style="margin-bottom: 20px;">Settings</h3>
 
-      <div style="margin-bottom: 25px;">
-        <label style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-          <span>Auto-Track Threshold</span>
-          <span id="threshold-display" style="color: #E5C07B; font-weight: bold;">80%</span>
-        </label>
-        <input type="range" id="threshold-slider" min="10" max="100" value="80" style="cursor: pointer;">
-        <p style="font-size: 11px; opacity: 0.7; margin-top: 5px;">The media percentage required to trigger an auto-update.</p>
-      </div>
-
-      <!-- ✅ NEW: AUTO-SKIP TOGGLE -->
-      <div style="margin-bottom: 25px; padding-top: 15px; border-top: 1px solid #2b3a4a;">
-        <label style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; cursor: pointer;">
-          <span style="color: #fff; font-weight: bold; font-size: 13px;">Auto-Skip Intros (Tier 1)</span>
-          <label class="toggle-switch-container">
-            <input type="checkbox" id="auto-skip-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-        </label>
-        <p style="font-size: 11px; opacity: 0.7; margin: 0;">Automatically bypasses intros when exact API data is found.</p>
-      </div>
-
-      <!-- ✅ NEW: UNLISTED BADGE TOGGLE -->
-      <div style="margin-bottom: 25px; padding-top: 15px; border-top: 1px solid #2b3a4a;">
-        <label style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; cursor: pointer;">
-          <span style="color: #fff; font-weight: bold; font-size: 13px;">Show 'Unlisted' Badges</span>
-          <label class="toggle-switch-container">
-            <input type="checkbox" id="unlisted-badge-toggle" checked>
-            <span class="toggle-slider"></span>
-          </label>
-        </label>
-        <p style="font-size: 11px; opacity: 0.7; margin: 0;">Display yellow DOM badges on media not in your list.</p>
-      </div>
-
-      <div>
-        <h4 style="margin-bottom: 10px;">Whitelisted Sites</h4>
-        <div id="whitelist-manager-list" style="background-color: #0b1119; border: 1px solid #1a2636; border-radius: 6px; max-height: 150px; overflow-y: auto; padding: 5px;">
+      <div class="settings-row">
+        <div style="display: flex; flex-direction: column;">
+          <span style="color: #fff; font-weight: bold; font-size: 13px;">Auto-Track Threshold</span>
+          <span style="font-size: 11px; color: #9fadbd;">Triggers update at <b id="threshold-display" style="color:#E5C07B;">80%</b></span>
         </div>
+        <input type="range" id="threshold-slider" min="10" max="100" value="80" style="width: 100px; padding: 0;">
       </div>
 
-      <!-- NEW: Data Export & Backup Tool -->
-      <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #2b3a4a;">
-        <h4 style="margin-bottom: 10px; color: #fff;">Data Management</h4>
-        <div style="display: flex; gap: 10px;">
-          <button id="export-data-btn" class="secondary-btn" style="flex: 1; border-color: #3db4f2; color: #3db4f2;">💾 Backup</button>
-          <button id="import-data-btn" class="secondary-btn" style="flex: 1; border-color: #E5C07B; color: #E5C07B;">📂 Restore</button>
-          <!-- Hidden file input for the restore button -->
-          <input type="file" id="import-file-input" accept=".json" class="hidden">
+      <div class="settings-row">
+        <div style="display: flex; flex-direction: column;">
+          <span style="color: #fff; font-weight: bold; font-size: 13px;">Auto-Skip Intros</span>
+          <span style="font-size: 11px; color: #9fadbd;">Bypasses using API data</span>
         </div>
-        <p style="font-size: 11px; opacity: 0.7; margin-top: 8px;">Backup your local settings, gamification streaks, and offline queues.</p>
+        <label class="toggle-switch-container"><input type="checkbox" id="auto-skip-toggle"><span class="toggle-slider"></span></label>
+      </div>
+
+      <div class="settings-row" style="border-bottom: none;">
+        <div style="display: flex; flex-direction: column;">
+          <span style="color: #fff; font-weight: bold; font-size: 13px;">'Unlisted' Badges</span>
+          <span style="font-size: 11px; color: #9fadbd;">Show yellow DOM markers</span>
+        </div>
+        <label class="toggle-switch-container"><input type="checkbox" id="unlisted-badge-toggle" checked><span class="toggle-slider"></span></label>
+      </div>
+
+      <div class="chart-card" style="margin-top: 15px;">
+        <h4 style="color: #fff; margin-bottom: 10px;">Whitelisted Sites</h4>
+        <div id="whitelist-manager-list" style="max-height: 150px; overflow-y: auto;"></div>
       </div>
       
-      <!-- Connected Accounts Section -->
-      <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #2b3a4a;">
-        <h4 style="margin-bottom: 10px; color: #fff;">Connected Accounts</h4>
+      <div class="chart-card">
+        <h4 style="color: #fff; margin-bottom: 10px;">Connected Accounts</h4>
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          <button id="settings-anilist-link-btn" class="secondary-btn" style="border-color: #3db4f2; color: #3db4f2;">Link to AniList</button>
-          <button id="settings-mal-link-btn" class="secondary-btn" style="border-color: #2E51A2; color: #2E51A2;">Link to MyAnimeList</button>
+          <button id="settings-anilist-link-btn" class="secondary-btn" style="border: 1px solid #3db4f2; color: #3db4f2;">Link to AniList</button>
+          <button id="settings-mal-link-btn" class="secondary-btn" style="border: 1px solid #2E51A2; color: #2E51A2;">Link to MyAnimeList</button>
         </div>
       </div>
 
-      <!-- NEW: CROSS-SYNC SECTION -->
-      <div id="cross-sync-section" class="hidden" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #2b3a4a;">
+      <div id="cross-sync-section" class="hidden chart-card" style="margin-top: 15px;">
         <h4 style="margin-bottom: 10px; color: #E5C07B;">🔄 Cross-Sync Data</h4>
         <p style="font-size: 11px; opacity: 0.7; margin-bottom: 10px;">Smart Merge: Shiinah will compare your lists and update both platforms to match your highest progress.</p>
-        
-        <button id="sync-shiinah-btn" class="primary-btn" style="width: 100%; background-color: #E5C07B; color: #0b1119; font-weight: bold;">
-          Sync to Shiinah
-        </button>
-        
-        <!-- PROGRESS BAR UI -->
+        <button id="sync-shiinah-btn" class="primary-btn" style="background-color: #E5C07B; color: #0b1119; font-weight: bold;">Sync to Shiinah</button>
         <div id="sync-progress-container" class="hidden" style="margin-top: 12px; background: #0b1119; border-radius: 4px; height: 8px; overflow: hidden; border: 1px solid #1a2636;">
           <div id="sync-progress-bar" style="height: 100%; width: 0%; background: #4cca51; transition: width 0.3s ease;"></div>
         </div>
         <div id="sync-status-text" style="font-size: 11px; color: #4cca51; margin-top: 6px; text-align: center; font-weight: bold;"></div>
       </div>
 
-      <button id="logout-btn" class="secondary-btn" style="width: 100%; margin-top: 25px; border-color: #e06c75; color: #e06c75;">Disconnect All Accounts</button>
+      <button id="logout-btn" class="secondary-btn" style="width: 100%; margin-top: 10px; color: #e74c3c;">Disconnect All Accounts</button>
     </div>
+    
+    <!-- 5. DETAIL VIEW (Edit Progress & Manual Bind) -->
+    <div id="detail-view" class="hidden animated-view">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <button id="back-btn" class="secondary-btn">← Back</button>
+        <label class="toggle-switch-container"><input type="checkbox" id="hide-title-toggle"><span class="toggle-slider"></span><span class="toggle-label">Hide</span></label>
+      </div>
 
-    <!-- UPDATED: PROFILE VIEW (Now with Detailed Stats) -->
-    <div id="profile-view" class="hidden">
+      <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+        <img id="detail-image" src="" style="width: 80px; height: 115px; object-fit: cover; border-radius: 8px;">
+        <div style="display: flex; flex-direction: column; justify-content: center;">
+          <h3 id="anime-title" style="margin: 0 0 4px 0; font-size: 15px; color: #fff;">Title</h3>
+          <div id="anime-synonyms" style="font-size: 11px; color: #9fadbd; font-style: italic;">Synonyms</div>
+        </div>
+      </div>
+
+      <div class="update-form">
+        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+          <div style="flex: 1;">
+            <label style="font-size: 11px; color: #9fadbd; margin-bottom: 4px; display: block;">Status</label>
+            <select id="status-select">
+              <option value="CURRENT">Watching</option>
+              <option value="COMPLETED">Completed</option>
+              <option value="DROPPED">Dropped</option>
+              <option value="PAUSED">Paused</option>
+            </select>
+          </div>
+          <div style="flex: 1;">
+            <label style="font-size: 11px; color: #9fadbd; margin-bottom: 4px; display: block;">Score (0-100)</label>
+            <input type="number" id="score-input" placeholder="e.g., 85">
+          </div>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <label style="font-size: 11px; color: #9fadbd; margin-bottom: 4px; display: block;">Progress</label>
+          <div class="episode-controls" style="display: flex; align-items: center; gap: 10px; background: #151f2e; border-radius: 8px; padding-right: 15px;">
+            <input type="number" id="episode-input" style="background: transparent; margin: 0;">
+            <span id="total-episodes" style="font-size: 14px; font-weight: bold; color: #677b94;">/ ?</span>
+          </div>
+        </div>
+        <button id="save-btn" class="primary-btn">Save Update</button>
+
+        <!-- NEW: Manual Binding & Unlisted Section -->
+        <div id="bind-section" style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 15px;">
+          <label style="font-size: 11px; color: #9fadbd; margin-bottom: 6px; display: block;">Fix Match / Bind AL or MAL (URL or ID):</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="bind-id-input" placeholder="e.g. 123456 or AL/MAL URL" style="margin: 0; flex: 1;">
+            <button id="bind-id-btn" class="secondary-btn" style="border: 1px solid #3db4f2; color: #3db4f2; font-size: 11px; white-space: nowrap;">Bind</button>
+          </div>
+          <button id="mark-unlisted-btn" class="secondary-btn" style="width: 100%; margin-top: 8px; font-size: 11px; color: #E5C07B; border: 1px solid #E5C07B;">Set as Unlisted (Local OTG Only)</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 6. PROFILE VIEW (RESTORED HTML ELEMENTS) -->
+    <div id="profile-view" class="hidden animated-view">
       <button id="profile-back-btn" class="secondary-btn" style="margin-bottom: 15px;">← Back</button>
       
       <div style="text-align: center; margin-bottom: 15px;">
         <h3 style="color: #3db4f2; margin-bottom: 5px;">Your Profile</h3>
-        <p style="font-size: 13px; color: #9fadbd; margin: 0;">Time Saved Skipping: <b id="time-saved-display" style="color: #fff;">0m</b></p>
+        <p style="font-size: 13px; color: #9fadbd; margin: 0;">Time Saved: <b id="time-saved-display" style="color: #fff;">0m</b></p>
         
-        <div id="xp-progress-wrapper">
-          <div id="xp-progress-container" title="Watch more anime to level up! (1 minute watched = 1 XP)">
-            <div id="xp-progress-bar"></div>
-            <div id="xp-hover-text">0 / 0 mins</div>
+        <div id="xp-progress-wrapper" style="margin: 15px 0;">
+          <div id="xp-progress-container" title="Watch more anime to level up! (1 minute watched = 1 XP)" style="width: 100%; background-color: #111a26; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; height: 18px; position: relative; overflow: hidden; cursor: help;">
+            <div id="xp-progress-bar" style="height: 100%; background-color: #E5C07B; width: 0%; transition: width 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);"></div>
+            <div id="xp-hover-text" style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; font-size: 11px; line-height: 18px; color: #fff; font-weight: bold; text-shadow: 1px 1px 2px #000; opacity: 0; transition: opacity 0.2s;">0 / 0 mins</div>
           </div>
         </div>
-        <button id="sync-history-btn" class="secondary-btn" style="width: 100%; font-size: 12px; margin-bottom: 15px;">🔄 Sync Past AniList History</button>
-        <button id="open-discover-btn" style="width: 100%; font-size: 13px; margin-bottom: 15px; background-color: #2b3a4a; color: #fff; border: 1px solid #3db4f2; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold;">✨ Discover New Anime</button>
+        
+        <button id="sync-history-btn" class="secondary-btn" style="width: 100%; font-size: 12px; margin-bottom: 10px;">🔄 Sync Past AniList History</button>
+        <button id="open-discover-btn" class="primary-btn" style="background-color: rgba(61, 180, 242, 0.1); color: #3db4f2; border: 1px solid rgba(61, 180, 242, 0.3); margin-bottom: 10px;">✨ Discover New Anime</button>
       </div>
 
-      <!-- 1. The 4-Grid Summary -->
-      <div class="stats-grid" id="profile-summary-grid">
-        <p class="placeholder-text" style="grid-column: span 2;">Loading stats...</p>
-      </div>
-
-      <!-- 2. Collection Status Donut -->
+      <div class="stats-grid" id="profile-summary-grid"></div>
+      
       <div class="chart-card hidden" id="profile-collection-card">
         <div class="chart-header">🕓 Collection Status</div>
         <div class="donut-container">
@@ -221,178 +242,82 @@
         <div class="status-legend" id="status-legend-list"></div>
       </div>
 
-      <!-- 3. Preferences (Genres & Themes) -->
       <div class="chart-card hidden" id="profile-genres-card">
         <div class="pref-header-top">
           <div style="color: #fff; font-weight: bold; font-size: 14px;">🎛️ Preferences</div>
           <div style="color: #9fadbd; font-size: 11px;">Most watched categories</div>
         </div>
-        
         <div class="pref-tabs-container">
           <div class="pref-tab active" id="tab-genres">Genres</div>
           <div class="pref-tab" id="tab-themes">Themes</div>
         </div>
-
         <div class="pref-grid" id="genres-grid"></div>
       </div>
 
-      <!-- 4. Shows by Type -->
       <div class="chart-card hidden" id="profile-formats-card">
         <div class="chart-header">🎞️ Shows by Type</div>
         <div class="format-list" id="formats-list"></div>
       </div>
       
-      <h4 style="margin: 20px 0 10px 0; border-bottom: 1px solid #2b3a4a; padding-bottom: 5px;">🏆 Local Achievements</h4>
-      <div id="achievements-container" style="display: grid; grid-template-columns: 1fr; gap: 8px;">
-        <p class="placeholder-text">Play some episodes to unlock achievements!</p>
-      </div>
-
-      <!-- 5. Interactive Score Chart -->
       <div class="chart-card hidden" id="profile-scores-card" style="margin-top: 15px;">
         <div class="chart-header">📈 Score Distribution</div>
-        
-        <!-- The dynamic bar chart container -->
-        <div id="score-chart-container" style="display: flex; align-items: flex-end; justify-content: space-between; height: 120px; padding-top: 20px; border-bottom: 1px solid #2b3a4a; gap: 4px;">
-          <!-- Bars will be injected here by JS -->
-        </div>
-        
-        <!-- Interactive Tooltip -->
-        <div id="score-chart-tooltip" style="text-align: center; font-size: 12px; color: var(--anilist-color); font-weight: bold; height: 20px; margin-top: 10px;">
-          Hover over a bar to see details
-        </div>
+        <div id="score-chart-container" style="display: flex; align-items: flex-end; justify-content: space-between; height: 120px; padding-top: 20px; border-bottom: 1px solid rgba(255,255,255,0.05); gap: 4px;"></div>
+        <div id="score-chart-tooltip" style="text-align: center; font-size: 12px; color: #3db4f2; font-weight: bold; height: 20px; margin-top: 10px;">Hover over a bar to see details</div>
       </div>
-    </div>
 
-    <!-- NEW: SEPARATE LEADERBOARD VIEW -->
-    <div id="leaderboard-view" class="hidden">
-      <h3 style="margin-bottom: 10px; border-bottom: 1px solid #2b3a4a; padding-bottom: 5px; color: #E5C07B;">Global Leaderboard</h3>
-      <div id="leaderboard-container" style="background-color: #0b1119; border: 1px solid #1a2636; border-radius: 6px; min-height: 150px; max-height: 350px; overflow-y: auto; padding: 10px;">
-        <p class="placeholder-text">Leaderboard syncing...</p>
-      </div>
-    </div>
-
-    <!-- 3. MAIN LIST VIEW -->
-    <div id="main-view">
-      <div style="display: flex; gap: 8px; margin-bottom: 15px;">
-        <input type="text" id="search-input" placeholder="Search anime list..." class="hidden" style="margin-bottom: 0; flex-grow: 1;">
-        <button id="layout-toggle-btn" class="secondary-btn hidden" title="Toggle Grid View" style="padding: 0 10px; font-size: 16px;">🔲</button>
-      </div>
-      <div id="day-tabs" class="day-tabs-container hidden"></div>
-      <div id="anime-list"></div>
-    </div>
-  </div>
-
-  <div id="detail-view" class="hidden">
-    <!-- Top Nav with Back Button & Toggle -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-      <button id="back-btn" class="secondary-btn">← Back</button>
-      <label class="toggle-switch-container" title="Hide this media from my schedule">
-        <input type="checkbox" id="hide-title-toggle">
-        <span class="toggle-slider"></span>
-        <span class="toggle-label">hide?</span>
-      </label>
-    </div>
-
-    <!-- Header: Cover, Title, and Synonyms -->
-    <div style="display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-start;">
-      <img id="detail-image" src="" alt="Cover" style="width: 80px; height: 115px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.5);">
-      <div style="display: flex; flex-direction: column; gap: 4px;">
-        <h3 id="anime-title" style="margin: 0; font-size: 15px; line-height: 1.2; color: #fff;">Title</h3>
-        <div id="anime-synonyms" style="font-size: 11px; color: #9fadbd; font-style: italic;">Synonyms here</div>
-      </div>
+      <h4 style="margin: 20px 0 10px 0; color: #fff;">🏆 Achievements</h4>
+      <div id="achievements-container" style="display: grid; gap: 8px;"></div>
     </div>
     
-    <!-- Synopsis Section -->
-    <div style="margin-bottom: 20px; font-size: 12px; color: #d3d3d3; line-height: 1.4; border-bottom: 1px solid #1a2636; padding-bottom: 15px;">
-      <div id="anime-synopsis" style="display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;">Synopsis Text here...</div>
-      <a href="#" id="read-more-synopsis" style="color: #3db4f2; font-weight: bold; text-decoration: none; font-size: 11px; float: right; margin-top: 4px;">Read More</a>
-      <div style="clear: both;"></div>
+    <!-- 7. LEADERBOARD VIEW -->
+    <div id="leaderboard-view" class="hidden animated-view">
+       <button id="leaderboard-back-btn" class="secondary-btn" style="margin-bottom: 15px;">← Back</button>
+       <h3 style="color: #E5C07B;">Global Leaderboard</h3>
+       <div id="leaderboard-container"></div>
     </div>
-
-    <!-- Input Forms -->
-    <div class="update-form">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
-        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #fff; font-weight: bold;">
-          Status:
-          <select id="status-select">
-            <option value="CURRENT">Watching</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="DROPPED">Dropped</option>
-            <option value="PAUSED">Paused</option>
-          </select>
-        </label>
-        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #fff; font-weight: bold;">
-          Score (0-100):
-          <input type="number" id="score-input" min="0" max="100" placeholder="e.g., 85">
-        </label>
-      </div>
-
-      <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #fff; font-weight: bold; margin-bottom: 20px;">
-        Episode / Chapter:
-        <div class="episode-controls" style="display: flex; align-items: center; gap: 10px;">
-          <input type="number" id="episode-input" min="0" style="flex-grow: 1;">
-          <span id="total-episodes" style="font-size: 16px; font-weight: bold; min-width: 30px; text-align: center; color: #9fadbd;">/ ?</span>
-        </div>
-      </label>
-
-      <button id="save-btn" class="primary-btn">Save Update</button>
-    </div>
-  </div>
-  <!-- NEW: RECOMMENDATION VIEW -->
-    <div id="recommendation-view" class="hidden">
-      <button id="rec-back-btn" class="secondary-btn" style="margin-bottom: 12px;">← Back to Profile</button>
-      
-      <!-- Added flex-grow: 1 so it takes up empty space -->
-      <div id="rec-loading" style="text-align: center; color: #9fadbd; margin-top: 50px; flex-grow: 1;">
-        Finding the perfect anime...
-      </div>
-
-      <!-- Adjusted to flex-grow instead of height:100% -->
+    
+    <!-- 8. RECOMMENDATION VIEW -->
+    <div id="recommendation-view" class="hidden animated-view">
+      <button id="rec-back-btn" class="secondary-btn" style="margin-bottom: 12px;">← Back</button>
+      <div id="rec-loading" style="text-align: center; color: #9fadbd; margin-top: 50px; flex-grow: 1;">Finding the perfect anime...</div>
       <div id="rec-content" class="hidden" style="display: flex; flex-direction: column; flex-grow: 1;">
-        <div class="rec-card">
-          <div class="rec-cover-container">
-            <div id="rec-wildcard-badge" class="rec-badge hidden">Wildcard Pick!</div>
-            <img id="rec-cover" class="rec-cover" src="">
-            <div class="rec-cover-fade"></div>
+        <div class="rec-card" style="background-color: #111a26; border-radius: 12px; overflow: hidden; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.05);">
+          <div class="rec-cover-container" style="width: 100%; height: 200px; position: relative;">
+            <img id="rec-cover" class="rec-cover" src="" style="width: 100%; height: 100%; object-fit: cover;">
+            <div class="rec-cover-fade" style="position: absolute; bottom: 0; left: 0; width: 100%; height: 50%; background: linear-gradient(to top, #111a26 0%, transparent 100%);"></div>
           </div>
-          <div class="rec-info">
-            <div>
-              <div id="rec-title" class="rec-title">Anime Title</div>
-              <div id="rec-alt-title" class="rec-alt-title">Alt Title</div>
-            </div>
-            <div id="rec-tags" class="rec-tags"></div>
-            <div id="rec-synopsis" class="rec-synopsis">Synopsis goes here...</div>
+          <div class="rec-info" style="padding: 15px;">
+            <div id="rec-title" style="font-weight: bold; font-size: 16px; color: #fff;">Title</div>
+            <div id="rec-alt-title" style="font-size: 11px; color: #9fadbd; font-style: italic; margin-bottom: 8px;">Alt Title</div>
+            <div id="rec-tags" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;"></div>
+            <div id="rec-synopsis" style="font-size: 12px; color: #9fadbd; line-height: 1.5; max-height: 100px; overflow-y: auto;">Synopsis...</div>
           </div>
         </div>
       </div>
-      
-      <!-- FIX: The Next Button is now outside of rec-content! -->
-      <button id="rec-next-btn" style="margin-top: 12px; width: 100%;">Skip / Next Recommendation ⏭️</button>
+      <button id="rec-next-btn" class="primary-btn">Skip / Next Recommendation ⏭️</button>
     </div>
 
-  <div id="fullscreen-modal" class="hidden">
-    <img id="modal-img" src="" alt="Fullscreen Cover">
-    <div class="modal-close-text">Click anywhere to close</div>
   </div>
 
-  <!-- ✅ FEATURE 1: Desync Resolution Modal -->
+  <div id="fullscreen-modal" class="hidden" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(11, 22, 34, 0.95); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer;">
+    <img id="modal-img" src="" style="max-width: 90%; max-height: 85%; border-radius: 8px;">
+    <div style="margin-top: 15px; font-size: 12px; opacity: 0.7;">Click anywhere to close</div>
+  </div>
+
   <div id="desync-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(11,17,25,0.9); z-index: 2147483647; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
     <div style="background: #1a2636; border: 1px solid #E5C07B; border-radius: 12px; padding: 20px; width: 280px; color: #fff; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.8);">
       <h3 style="color: #E5C07B; margin-top: 0; margin-bottom: 10px; font-size: 16px;">⚠️ Sync Conflict</h3>
       <p style="font-size: 13px; color: #9fadbd; margin-bottom: 20px; line-height: 1.4;">Which progress is correct for <br><b id="desync-title" style="color:#fff;">Title</b>?</p>
       <div style="display: flex; gap: 10px;">
-        <button id="desync-al-btn" class="primary-btn" style="flex: 1; background: #3db4f2; padding: 8px;">AniList (Ep X)</button>
-        <button id="desync-mal-btn" class="primary-btn" style="flex: 1; background: #2E51A2; padding: 8px;">MAL (Ep Y)</button>
+        <button id="desync-al-btn" class="primary-btn" style="flex: 1; background: #3db4f2; padding: 8px;">AniList</button>
+        <button id="desync-mal-btn" class="primary-btn" style="flex: 1; background: #2E51A2; padding: 8px;">MAL</button>
       </div>
       <button id="desync-cancel-btn" style="background: transparent; color: #aaa; border: none; margin-top: 15px; cursor: pointer; font-size: 12px; text-decoration: underline;">Cancel</button>
     </div>
   </div>
 
-  <!-- Modules load first -->
   <script type="module" src="config.js"></script>
   <script type="module" src="achievements.js"></script>
-  
-  <!-- Add 'defer' so these wait for the modules to initialize -->
   <script src="popup.js" defer></script>
   <script src="profile.js" defer></script>
   <script src="discover.js" defer></script>
